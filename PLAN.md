@@ -25,11 +25,11 @@
 
 ## Etapa 3 — Interface
 
-- [ ] Criar janela PySide6 com entrada, importação, Spotify/fallback e destino.
-- [ ] Criar tabela de revisão editável/selecionável e nova pesquisa.
-- [ ] Criar painel de downloads, progresso por item/total, logs e resumo.
-- [ ] Integrar workers Qt sem bloquear a thread de UI.
-- [ ] Aplicar e documentar o sistema visual retrô.
+- [x] Criar janela PySide6 com entrada, importação, Spotify/fallback e destino.
+- [x] Criar tabela de revisão editável/selecionável e nova pesquisa.
+- [x] Criar painel de downloads, progresso por item/total, logs e resumo.
+- [x] Integrar workers Qt sem bloquear a thread de UI.
+- [x] Aplicar e documentar o sistema visual retrô.
 
 ## Etapa 4 — Robustez e empacotamento
 

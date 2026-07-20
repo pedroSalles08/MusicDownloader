@@ -2,9 +2,9 @@
 
 Aplicativo desktop Windows em construção para pesquisar, revisar e baixar em MP3 músicas que o usuário possua ou tenha autorização para baixar. O backend usa yt-dlp e FFmpeg; a interface será feita com PySide6.
 
-> Estado atual: núcleo de entradas e serviços yt-dlp implementados e testados
-> com fakes. A interface e o executável ainda não foram implementados, e a
-> integração de rede real ainda aguarda validação manual.
+> Estado atual: fluxo desktop PySide6 implementado e testado offscreen com
+> serviços fake. O executável e a integração de rede real ainda aguardam as
+> etapas de validação e empacotamento.
 
 ## MVP planejado
 
@@ -29,6 +29,13 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pytest
 ```
 
+Para abrir o aplicativo ou executar apenas o smoke-test sem rede:
+
+```powershell
+.\.venv\Scripts\python.exe -m music_downloader
+.\.venv\Scripts\python.exe -m music_downloader --smoke-test
+```
+
 O pacote `music_downloader` já oferece:
 
 - parser de lista separada por `;`, com trim e deduplicação Unicode estável;
@@ -41,10 +48,13 @@ O pacote `music_downloader` já oferece:
 - detecção injetável de FFmpeg e FFprobe;
 - pesquisa de um resultado por query, sem download, com falhas isoladas;
 - download por URL já aprovada, MP3 192 kbps, metadados, capa opcional,
-  retries, progresso e cancelamento cooperativo.
+  retries, progresso e cancelamento cooperativo;
+- interface PySide6 em pt-BR com importação, fallback Spotify, revisão
+  editável, seleção, progresso, logs, cancelamento e resumo;
+- workers `QThread` que mantêm operações longas fora da thread da interface.
 
-Essas APIs formam o núcleo de domínio e ainda não constituem um aplicativo
-executável para o usuário final.
+O visual e seus tokens estão documentados em `DESIGN_SYSTEM.md`. A execução por
+Python já funciona; a geração e abertura do `.exe` pertencem à próxima etapa.
 
 ## Pré-requisitos previstos para o aplicativo completo
 
@@ -54,9 +64,9 @@ executável para o usuário final.
 - Node no PATH para o suporte JavaScript atual do YouTube no yt-dlp;
 - aria2c opcional.
 
-yt-dlp já é dependência de runtime. PySide6 e PyInstaller serão adicionados nas
-etapas de interface e empacotamento. Os testes atuais não acessam a rede nem
-executam FFmpeg; ambos são substituídos por fakes nas verificações dos serviços.
+yt-dlp e PySide6 já são dependências de runtime. PyInstaller será adicionado na
+etapa de empacotamento. Os testes atuais não acessam a rede nem executam FFmpeg;
+ambos são substituídos por fakes nas verificações dos serviços e da interface.
 
 ## Referências do repositório
 
