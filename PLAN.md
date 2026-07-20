@@ -5,15 +5,15 @@
 - [x] Inspecionar prompt, contexto, CSV real, imagem e projeto anterior.
 - [x] Inicializar o repositório Git.
 - [x] Criar documentação persistente.
-- [ ] Criar estrutura Python, ambiente e configuração de testes/build.
+- [x] Criar estrutura Python, ambiente e configuração de testes/build.
 
 ## Etapa 1 — Domínio e entradas
 
-- [ ] Modelar itens, estados e resultados de importação.
-- [ ] Implementar parser de lista por `;` com deduplicação estável.
-- [ ] Implementar CSV robusto e resumo de linhas inválidas/duplicadas.
-- [ ] Implementar saneamento de nomes Windows e detecção de dependências.
-- [ ] Cobrir casos mínimos com pytest.
+- [x] Modelar resultados de importação e dependências.
+- [x] Implementar parser de lista por `;` com deduplicação estável.
+- [x] Implementar CSV robusto e resumo de linhas inválidas/duplicadas.
+- [x] Implementar saneamento de nomes Windows e detecção de dependências.
+- [x] Cobrir casos mínimos com pytest.
 
 ## Etapa 2 — Serviços
 
@@ -42,4 +42,3 @@
 ## Estratégia de commits
 
 Um commit pequeno após cada etapa aprovada: fundação; domínio/importação; serviços; UI; robustez; pacote final. Arquivos de entrada fornecidos pelo usuário permanecem versionados como referência, salvo decisão documentada em contrário.
-

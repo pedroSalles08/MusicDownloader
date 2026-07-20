@@ -2,7 +2,8 @@
 
 Aplicativo desktop Windows em construção para pesquisar, revisar e baixar em MP3 músicas que o usuário possua ou tenha autorização para baixar. O backend usa yt-dlp e FFmpeg; a interface será feita com PySide6.
 
-> Estado atual: fundação e documentação. O aplicativo e o executável ainda não foram implementados.
+> Estado atual: núcleo de entradas implementado e testado. A interface, pesquisa,
+> download e executável ainda não foram implementados.
 
 ## MVP planejado
 
@@ -16,7 +17,32 @@ Aplicativo desktop Windows em construção para pesquisar, revisar e baixar em M
 
 Links públicos do Spotify serão reconhecidos, mas a importação direta não faz parte do MVP; o aplicativo orientará o uso de Exportify e CSV.
 
-## Pré-requisitos previstos
+## Desenvolvimento
+
+Pré-requisito atual: Python 3.11 ou posterior. No PowerShell, crie o ambiente,
+instale o pacote editável com as dependências de teste e execute a suíte:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pytest
+```
+
+O pacote `music_downloader` já oferece:
+
+- parser de lista separada por `;`, com trim e deduplicação Unicode estável;
+- importador CSV Exportify com diagnóstico de linhas inválidas; para recuperar
+  após aspas malformadas, cada linha física é um registro e campos CSV
+  multilinha são rejeitados;
+- detecção de URL pública de playlist do Spotify;
+- saneamento de componentes de nome de arquivo para Windows, limitado por
+  unidades UTF-16 sem cortar caracteres suplementares;
+- detecção injetável de FFmpeg e FFprobe.
+
+Essas APIs formam o núcleo de domínio e ainda não constituem um aplicativo
+executável para o usuário final.
+
+## Pré-requisitos previstos para o aplicativo completo
 
 - Windows 10/11;
 - Python 3.11 ou posterior para desenvolvimento;
@@ -24,7 +50,9 @@ Links públicos do Spotify serão reconhecidos, mas a importação direta não f
 - Node no PATH para o suporte JavaScript atual do YouTube no yt-dlp;
 - aria2c opcional.
 
-Os comandos de instalação, execução, testes e build serão adicionados assim que a estrutura Python correspondente existir e for validada.
+PySide6, yt-dlp e PyInstaller serão adicionados nas etapas que implementarem a
+interface, os serviços e o empacotamento. Nenhum download de rede faz parte da
+etapa atual.
 
 ## Referências do repositório
 
