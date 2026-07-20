@@ -33,11 +33,11 @@
 
 ## Etapa 4 — Robustez e empacotamento
 
-- [ ] Executar suíte completa e análise do diff.
-- [ ] Validar manualmente parser, CSV real e fluxo controlado de pesquisa/download.
-- [ ] Criar spec/receita PyInstaller e gerar `.exe`.
-- [ ] Abrir o executável e registrar evidência.
-- [ ] Fazer revisão QA final e corrigir até aprovação.
+- [x] Executar suíte completa e análise do diff.
+- [x] Validar manualmente parser, CSV real e fluxo controlado de pesquisa/download.
+- [x] Criar spec/receita PyInstaller e gerar `.exe`.
+- [x] Abrir o executável e registrar evidência.
+- [x] Fazer revisão QA final e corrigir até aprovação.
 
 ## Estratégia de commits
 

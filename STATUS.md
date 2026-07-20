@@ -4,10 +4,10 @@ Atualizado em: 2026-07-20
 
 ## Estado atual
 
-**Em andamento — interface PySide6 aprovada; iniciando empacotamento.** O
-repositório contém entradas e serviços aprovados e um fluxo desktop testado
-offscreen. Ainda não existem empacotamento ou executável, e a integração de
-rede real ainda não foi validada.
+**Concluído — versão Windows onedir aprovada.** Entradas, serviços, interface,
+build, abertura do executável, inspeção visual nativa e conversão real
+controlada com yt-dlp/FFmpeg passaram por validação. O revisor QA final refez o
+build e encerrou sua análise com `APROVADO`.
 
 ## Implementado nesta etapa
 
@@ -46,19 +46,43 @@ rede real ainda não foi validada.
   consultas e progressos nunca regridem nem reabrem estado terminal.
 - Campos principais têm labels/buddies com atalhos, nomes e descrições
   acessíveis; tokens de azul/aviso atendem contraste WCAG AA de 4,5:1.
+- Receita PyInstaller `onedir` versionada, com build limpo repetível e smoke
+  sem rede; binários externos FFmpeg, FFprobe, Node e aria2c não são embutidos.
+- Validação manual controlada tenta o vídeo público conhecido apenas após
+  confirmar ID e título; se a confirmação falhar, usa um tom autorizado servido
+  em `localhost`, convertido pelo serviço real e removido ao final.
 
 ## Evidência automatizada
 
 - Ambiente criado em `.venv` com Python 3.13.14.
 - Instalação editável: `.\\.venv\\Scripts\\python.exe -m pip install -e '.[dev]'` — concluída.
-- Testes de domínio, serviços, workers e interface:
-  `.\\.venv\\Scripts\\python.exe -m pytest` — **101 passaram em 1,86 s**.
+- Testes de domínio, serviços, workers, interface e empacotamento:
+  `.\\.venv\\Scripts\\python.exe -m pytest` — **105 passaram em 1,82 s**.
 - Regressões específicas cobrem limite UTF-16 com emoji/surrogates e CSV com
   conteúdo após aspas, aspas não fechadas, escape válido e campo multilinha.
 - O teste da amostra real confirmou 159 linhas lidas, 158 queries únicas, uma
   duplicata e nenhuma linha inválida.
 - Testes Qt usam plataforma offscreen; não usam rede real, extração yt-dlp real
-  nem FFmpeg externo. O smoke-test abre e fecha a janela sem rede.
+  nem FFmpeg externo. O smoke-test Python abre e fecha a janela sem rede.
+- `packaging/build.ps1 -SkipInstall` concluiu o build final em cerca de 63 s e
+  gerou `dist\\MusicDownloader\\MusicDownloader.exe`: 8.338.876 bytes, 217
+  arquivos e 125.650.041 bytes na pasta onedir. Nenhum executável externo ou
+  módulo de desenvolvimento foi incluído.
+- O smoke do `.exe` terminou com código 0. Na abertura normal, o processo
+  permaneceu ativo por 3,5 s com o título esperado e foi encerrado pelo PID
+  exato lançado para o teste.
+- O QA final confirmou SHA-256
+  `99CCCD774850D9EBDAE1E6E464349268CDABE9687591E050D6F721AC0F78D161`
+  para o executável de 8.338.876 bytes.
+- Pesquisa real encontrou um resultado, mas com ID diferente do vídeo público
+  esperado; o download foi corretamente bloqueado. O fallback local gerou WAV
+  de 88.278 bytes e MP3 de 26.059 bytes em uma tentativa, encerrou o servidor e
+  removeu toda a mídia temporária.
+- A janela foi renderizada com o backend Qt `windows` e inspecionada em estado
+  inicial; hierarquia, legibilidade, alinhamento e estados desabilitados estavam
+  coerentes. A captura temporária foi removida e não integra o repositório.
+- `pip check`, `compileall`, smoke-test Python e `git diff --check` concluíram
+  sem erro.
 
 ## Inventário confirmado
 
@@ -67,19 +91,20 @@ rede real ainda não foi validada.
 - `csv-example.csv`: 159 linhas de dados, 24 colunas, títulos/artistas presentes e 158 queries únicas; expectativa agora coberta por teste automatizado.
 - `UI-inspirations-design.png`: painel de referências retro internet/desktop revisado.
 - Ambiente: Python 3.13, FFmpeg 8.1.2, FFprobe, aria2c, Node e Git disponíveis.
-- pytest 9.1.1, pytest-qt 4.5.0, yt-dlp 2026.7.4 e PySide6 6.11.1 instalados no
-  `.venv`; PyInstaller permanece fora do ambiente até o empacotamento.
+- pytest 9.1.1, pytest-qt 4.5.0, yt-dlp 2026.7.4, PySide6 6.11.1 e PyInstaller
+  6.21.0 instalados no `.venv`.
 
-## Reutilização planejada
+## Reutilização do script anterior
 
 - Busca `ytsearch1`, download de melhor áudio e pós-processamento MP3 192 kbps.
 - Retry por item, fragmentos simultâneos, aria2c opcional e capa opcional.
 - Comparação normalizada de cabeçalhos CSV e leitura `utf-8-sig`.
 
-## Próximo gate
+## Próximos passos opcionais
 
-PyInstaller gera o aplicativo Windows, o `.exe` inicia corretamente e um fluxo
-manual controlado confirma entrada, busca e download/conversão sem regressões.
+Gate concluído. Próximas evoluções opcionais podem incluir instalador,
+assinatura de código e integração direta com Spotify mediante solução robusta
+de autenticação; nenhuma delas bloqueia o MVP entregue.
 
 ## Revisão da etapa
 
@@ -98,12 +123,12 @@ manual controlado confirma entrada, busca e download/conversão sem regressões.
 - Interface, ciclo corretivo 1: sinais com geração, guardas monotônicas e
   terminais, contraste AA e associações acessíveis.
 - Resultado da interface: **101 testes passaram; REVISOR_QA: APROVADO**.
-- Interface, primeiro ciclo: reprovado por callbacks atrasados/fora de ordem,
-  progresso regressivo, contraste/acessibilidade e concordância gramatical.
-- Interface, ciclo corretivo 1: sinais carregam geração, guardas terminais e
-  monotônicas foram adicionadas, ordem é normalizada e acessibilidade revisada;
-  aguardando re-revisão QA.
+- Robustez/empacotamento: **105 testes passaram**, build limpo refeito, `.exe`
+  aberto e fluxo real controlado repetido; **REVISOR_QA FINAL: APROVADO**.
 
 ## Bloqueios
 
-Nenhum bloqueio técnico confirmado. O acesso direto a playlists Spotify permanece fora do MVP e não bloqueia a entrega.
+Nenhum bloqueio técnico confirmado. O acesso direto a playlists Spotify
+permanece fora do MVP e não bloqueia a entrega. A variabilidade da pesquisa do
+YouTube exige revisão humana; nesta validação, a divergência de ID foi detectada
+e nenhum conteúdo ambíguo foi baixado.

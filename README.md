@@ -1,12 +1,14 @@
 # Music Downloader
 
-Aplicativo desktop Windows em construção para pesquisar, revisar e baixar em MP3 músicas que o usuário possua ou tenha autorização para baixar. O backend usa yt-dlp e FFmpeg; a interface será feita com PySide6.
+Aplicativo desktop Windows para pesquisar, revisar e baixar em MP3 músicas que
+o usuário possua ou tenha autorização para baixar. O backend usa yt-dlp e
+FFmpeg; a interface é feita com PySide6.
 
-> Estado atual: fluxo desktop PySide6 implementado e testado offscreen com
-> serviços fake. O executável e a integração de rede real ainda aguardam as
-> etapas de validação e empacotamento.
+> Estado atual: versão Windows `onedir` gerada, validada e aprovada pelo QA
+> final. A suíte usa serviços fake; uma validação manual separada exercita
+> yt-dlp e FFmpeg reais sem conservar a mídia temporária.
 
-## MVP planejado
+## Funcionalidades entregues
 
 - lista de músicas separada por `;`;
 - importação de CSV do Spotify/Exportify;
@@ -36,6 +38,36 @@ Para abrir o aplicativo ou executar apenas o smoke-test sem rede:
 .\.venv\Scripts\python.exe -m music_downloader --smoke-test
 ```
 
+## Build do aplicativo Windows
+
+O build reproduzível usa o arquivo `MusicDownloader.spec`. Este comando cria o
+ambiente quando necessário, instala as dependências de desenvolvimento, limpa
+o estado de trabalho do PyInstaller e gera uma distribuição `onedir`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1
+```
+
+Se o ambiente já estiver sincronizado, use `-SkipInstall`. O executável fica em
+`dist\MusicDownloader\MusicDownloader.exe`; distribua a pasta
+`dist\MusicDownloader` inteira, não apenas o `.exe`.
+
+FFmpeg, FFprobe, Node e aria2c não são incorporados ao pacote. FFmpeg e FFprobe
+são obrigatórios no `PATH`; Node melhora a compatibilidade atual do YouTube e
+aria2c é opcional. A distribuição ainda não possui instalador nem assinatura
+de código.
+
+Para repetir a validação real controlada:
+
+```powershell
+.\.venv\Scripts\python.exe .\packaging\manual_validation.py
+```
+
+O script só baixa do YouTube quando ID e título correspondem ao vídeo público
+de teste esperado. Caso contrário, gera um tom autorizado, serve-o apenas em
+`localhost`, converte-o para MP3 com o mesmo serviço da aplicação e remove a
+pasta temporária ao final.
+
 O pacote `music_downloader` já oferece:
 
 - parser de lista separada por `;`, com trim e deduplicação Unicode estável;
@@ -54,9 +86,9 @@ O pacote `music_downloader` já oferece:
 - workers `QThread` que mantêm operações longas fora da thread da interface.
 
 O visual e seus tokens estão documentados em `DESIGN_SYSTEM.md`. A execução por
-Python já funciona; a geração e abertura do `.exe` pertencem à próxima etapa.
+Python e pelo pacote `onedir` foi validada no Windows.
 
-## Pré-requisitos previstos para o aplicativo completo
+## Pré-requisitos e limitações atuais
 
 - Windows 10/11;
 - Python 3.11 ou posterior para desenvolvimento;
@@ -64,9 +96,11 @@ Python já funciona; a geração e abertura do `.exe` pertencem à próxima etap
 - Node no PATH para o suporte JavaScript atual do YouTube no yt-dlp;
 - aria2c opcional.
 
-yt-dlp e PySide6 já são dependências de runtime. PyInstaller será adicionado na
-etapa de empacotamento. Os testes atuais não acessam a rede nem executam FFmpeg;
-ambos são substituídos por fakes nas verificações dos serviços e da interface.
+yt-dlp e PySide6 são dependências de runtime; PyInstaller é dependência de
+desenvolvimento. Os testes automatizados não acessam a rede nem executam
+FFmpeg: ambos são substituídos por fakes nas verificações dos serviços e da
+interface. Resultados do YouTube podem variar ou exigir atualização do yt-dlp;
+por isso a revisão humana antes do download permanece obrigatória.
 
 ## Referências do repositório
 
