@@ -9,7 +9,9 @@ description = "Nucleo de um aplicativo Windows para preparar downloads autorizad
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
-dependencies = []
+dependencies = [
+    "yt-dlp>=2026.6.9",
+]
 
 [project.optional-dependencies]
 dev = [

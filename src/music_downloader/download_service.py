@@ -1,0 +1,469 @@
+"""Sequential, retrying yt-dlp download service with cooperative cancellation."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable
+import hashlib
+from pathlib import Path
+from typing import Any
+
+import yt_dlp
+
+from music_downloader.cancellation import CancellationToken, OperationCancelled
+from music_downloader.dependencies import detect_media_tools
+from music_downloader.diagnostics import exception_diagnostic
+from music_downloader.models import (
+    DownloadBatchResult,
+    DownloadProgress,
+    DownloadProgressStatus,
+    DownloadResult,
+    DownloadStatus,
+    MediaToolsStatus,
+    SearchResult,
+    SearchStatus,
+)
+from music_downloader.windows_paths import sanitize_windows_filename
+from music_downloader.ytdlp_types import YoutubeDLFactory, default_ytdl_factory
+
+DownloadProgressCallback = Callable[[DownloadProgress], None]
+ToolDetector = Callable[[], MediaToolsStatus]
+RetryWaiter = Callable[[float, CancellationToken], None]
+
+_MAX_BASENAME_UTF16_UNITS = 240
+
+
+def _utf16_units(value: str) -> int:
+    return len(value.encode("utf-16-le")) // 2
+
+
+def _default_waiter(delay: float, token: CancellationToken) -> None:
+    if token.wait(delay):
+        token.raise_if_cancelled()
+
+
+def _stable_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8", errors="surrogatepass")).hexdigest()[:8]
+
+
+def build_output_basename(
+    result: SearchResult, *, ordinal: int | None = None
+) -> str:
+    """Build a safe title that keeps a stable media identifier suffix."""
+
+    raw_id = result.id
+    if not raw_id:
+        raw_id = _stable_hash(result.url or result.query)
+    safe_id = sanitize_windows_filename(raw_id, max_length=48, fallback="item")
+    if safe_id != raw_id:
+        safe_id = sanitize_windows_filename(
+            f"{safe_id}-{_stable_hash(raw_id)}", max_length=57, fallback="item"
+        )
+    ordinal_suffix = f" ({ordinal})" if ordinal is not None else ""
+    suffix = f" [{safe_id}]{ordinal_suffix}"
+    title_budget = _MAX_BASENAME_UTF16_UNITS - _utf16_units(suffix)
+    safe_title = sanitize_windows_filename(
+        result.title or result.query,
+        max_length=max(1, title_budget),
+        fallback="audio",
+    )
+    return sanitize_windows_filename(
+        f"{safe_title}{suffix}",
+        max_length=_MAX_BASENAME_UTF16_UNITS,
+        fallback=f"audio{suffix}",
+    )
+
+
+def _reserve_output_basename(
+    result: SearchResult,
+    *,
+    existing_names: tuple[str, ...],
+    reserved_basenames: set[str],
+) -> str:
+    ordinal: int | None = None
+    while True:
+        candidate = build_output_basename(result, ordinal=ordinal)
+        key = candidate.casefold()
+        exists_on_disk = any(
+            name == key or name.startswith(f"{key}.") for name in existing_names
+        )
+        if key not in reserved_basenames and not exists_on_disk:
+            reserved_basenames.add(key)
+            return candidate
+        ordinal = 2 if ordinal is None else ordinal + 1
+
+
+def download_options(
+    output_template: Path,
+    *,
+    embed_thumbnail: bool,
+    aria2c_path: str | None,
+    progress_hook: Callable[[dict[str, Any]], None],
+) -> dict[str, Any]:
+    """Return adapted, structured yt-dlp options from the validated script."""
+
+    postprocessors: list[dict[str, Any]] = [
+        {
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
+        },
+        {"key": "FFmpegMetadata", "add_metadata": True},
+    ]
+    if embed_thumbnail:
+        postprocessors.append({"key": "EmbedThumbnail"})
+
+    options: dict[str, Any] = {
+        "format": "bestaudio/best",
+        "outtmpl": str(output_template),
+        "noplaylist": True,
+        "js_runtimes": {"node": {}},
+        "continuedl": True,
+        "retries": 10,
+        "fragment_retries": 10,
+        "concurrent_fragment_downloads": 8,
+        "socket_timeout": 30,
+        "writethumbnail": embed_thumbnail,
+        "postprocessors": postprocessors,
+        "progress_hooks": [progress_hook],
+    }
+    if aria2c_path:
+        options["external_downloader"] = aria2c_path
+        options["external_downloader_args"] = {"aria2c": ["-k", "1M"]}
+    return options
+
+
+class DownloadService:
+    def __init__(
+        self,
+        ytdl_factory: YoutubeDLFactory = default_ytdl_factory,
+        *,
+        tool_detector: ToolDetector = detect_media_tools,
+        waiter: RetryWaiter = _default_waiter,
+        transient_errors: tuple[type[Exception], ...] = (yt_dlp.utils.DownloadError,),
+        retry_delays: tuple[float, ...] = (2.0, 5.0),
+    ) -> None:
+        self._ytdl_factory = ytdl_factory
+        self._tool_detector = tool_detector
+        self._waiter = waiter
+        self._transient_errors = transient_errors
+        self._retry_delays = retry_delays
+
+    def download_batch(
+        self,
+        approved_results: Iterable[SearchResult],
+        output_directory: str | Path,
+        *,
+        embed_thumbnail: bool = False,
+        aria2c_path: str | None = None,
+        cancellation: CancellationToken | None = None,
+        progress_callback: DownloadProgressCallback | None = None,
+    ) -> DownloadBatchResult:
+        """Download approved direct URLs, continuing after individual failures."""
+
+        token = cancellation or CancellationToken()
+        items = tuple(approved_results)
+        if not items:
+            return DownloadBatchResult(results=(), cancelled=token.cancelled)
+        if token.cancelled:
+            return DownloadBatchResult(results=(), cancelled=True)
+
+        try:
+            tools = self._tool_detector()
+        except Exception as error:
+            return DownloadBatchResult(
+                results=(),
+                cancelled=False,
+                preflight_error=exception_diagnostic(error),
+            )
+        if not tools.available:
+            return DownloadBatchResult(
+                results=(), cancelled=False, preflight_error=tools.guidance
+            )
+
+        try:
+            destination = Path(output_directory)
+            destination.mkdir(parents=True, exist_ok=True)
+            existing_names = tuple(entry.name.casefold() for entry in destination.iterdir())
+        except (OSError, TypeError, ValueError) as error:
+            return DownloadBatchResult(
+                results=(),
+                cancelled=False,
+                preflight_error=exception_diagnostic(error),
+            )
+
+        outcomes: list[DownloadResult] = []
+        reserved_basenames: set[str] = set()
+        for item_index, item in enumerate(items, start=1):
+            if token.cancelled:
+                break
+
+            basename = None
+            if item.status is SearchStatus.FOUND and item.url:
+                basename = _reserve_output_basename(
+                    item,
+                    existing_names=existing_names,
+                    reserved_basenames=reserved_basenames,
+                )
+            outcome = self._download_one(
+                item,
+                item_index=item_index,
+                total_items=len(items),
+                processed_items=len(outcomes),
+                destination=destination,
+                embed_thumbnail=embed_thumbnail,
+                aria2c_path=aria2c_path,
+                token=token,
+                progress_callback=progress_callback,
+                basename=basename,
+            )
+            outcomes.append(outcome)
+            if token.cancelled:
+                break
+
+        return DownloadBatchResult(
+            results=tuple(outcomes),
+            cancelled=token.cancelled,
+        )
+
+    def _download_one(
+        self,
+        item: SearchResult,
+        *,
+        item_index: int,
+        total_items: int,
+        processed_items: int,
+        destination: Path,
+        embed_thumbnail: bool,
+        aria2c_path: str | None,
+        token: CancellationToken,
+        progress_callback: DownloadProgressCallback | None,
+        basename: str | None,
+    ) -> DownloadResult:
+        if item.status is not SearchStatus.FOUND or not item.url:
+            error = "O item aprovado não possui um resultado encontrado com URL direta."
+            self._emit_progress(
+                item,
+                item_index,
+                total_items,
+                processed_items + 1,
+                DownloadProgressStatus.ERROR,
+                progress_callback,
+            )
+            return DownloadResult(
+                query=item.query,
+                id=item.id,
+                status=DownloadStatus.ERROR,
+                output_path=None,
+                attempts=0,
+                error=error,
+            )
+
+        if basename is None:
+            raise AssertionError("valid download item requires a reserved basename")
+        output_path = destination / f"{basename}.mp3"
+        output_template = destination / f"{basename}.%(ext)s"
+        attempt_limit = min(3, len(self._retry_delays) + 1)
+
+        def hook(data: dict[str, Any]) -> None:
+            token.raise_if_cancelled()
+            hook_status = data.get("status")
+            status = (
+                DownloadProgressStatus.PROCESSING
+                if hook_status == "finished"
+                else DownloadProgressStatus.DOWNLOADING
+            )
+            downloaded = self._optional_int(data.get("downloaded_bytes"))
+            total = self._optional_int(data.get("total_bytes")) or self._optional_int(
+                data.get("total_bytes_estimate")
+            )
+            fraction = None
+            if downloaded is not None and total:
+                fraction = min(1.0, max(0.0, downloaded / total))
+            self._emit_progress(
+                item,
+                item_index,
+                total_items,
+                processed_items,
+                status,
+                progress_callback,
+                item_fraction=fraction,
+                downloaded_bytes=downloaded,
+                total_bytes=total,
+            )
+            token.raise_if_cancelled()
+
+        options = download_options(
+            output_template,
+            embed_thumbnail=embed_thumbnail,
+            aria2c_path=aria2c_path,
+            progress_hook=hook,
+        )
+
+        for attempt in range(1, attempt_limit + 1):
+            try:
+                token.raise_if_cancelled()
+                with self._ytdl_factory(options) as ydl:
+                    ydl.extract_info(item.url, download=True)
+                token.raise_if_cancelled()
+                self._emit_progress(
+                    item,
+                    item_index,
+                    total_items,
+                    processed_items + 1,
+                    DownloadProgressStatus.COMPLETED,
+                    progress_callback,
+                    item_fraction=1.0,
+                )
+                return DownloadResult(
+                    query=item.query,
+                    id=item.id,
+                    status=DownloadStatus.COMPLETED,
+                    output_path=output_path,
+                    attempts=attempt,
+                )
+            except OperationCancelled as error:
+                self._emit_progress(
+                    item,
+                    item_index,
+                    total_items,
+                    processed_items + 1,
+                    DownloadProgressStatus.CANCELLED,
+                    progress_callback,
+                )
+                return DownloadResult(
+                    query=item.query,
+                    id=item.id,
+                    status=DownloadStatus.CANCELLED,
+                    output_path=None,
+                    attempts=attempt,
+                    error=str(error),
+                )
+            except self._transient_errors as error:
+                if token.cancelled:
+                    self._emit_progress(
+                        item,
+                        item_index,
+                        total_items,
+                        processed_items + 1,
+                        DownloadProgressStatus.CANCELLED,
+                        progress_callback,
+                    )
+                    return DownloadResult(
+                        query=item.query,
+                        id=item.id,
+                        status=DownloadStatus.CANCELLED,
+                        output_path=None,
+                        attempts=attempt,
+                        error="Operação cancelada pelo usuário.",
+                    )
+                if attempt == attempt_limit:
+                    return self._error_result(
+                        item,
+                        attempt,
+                        error,
+                        item_index,
+                        total_items,
+                        processed_items,
+                        progress_callback,
+                    )
+                self._emit_progress(
+                    item,
+                    item_index,
+                    total_items,
+                    processed_items,
+                    DownloadProgressStatus.RETRYING,
+                    progress_callback,
+                )
+                try:
+                    self._waiter(self._retry_delays[attempt - 1], token)
+                    token.raise_if_cancelled()
+                except OperationCancelled as cancellation_error:
+                    self._emit_progress(
+                        item,
+                        item_index,
+                        total_items,
+                        processed_items + 1,
+                        DownloadProgressStatus.CANCELLED,
+                        progress_callback,
+                    )
+                    return DownloadResult(
+                        query=item.query,
+                        id=item.id,
+                        status=DownloadStatus.CANCELLED,
+                        output_path=None,
+                        attempts=attempt,
+                        error=str(cancellation_error),
+                    )
+            except Exception as error:
+                return self._error_result(
+                    item,
+                    attempt,
+                    error,
+                    item_index,
+                    total_items,
+                    processed_items,
+                    progress_callback,
+                )
+
+        raise AssertionError("unreachable")
+
+    @staticmethod
+    def _optional_int(value: object) -> int | None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return int(value)
+
+    @staticmethod
+    def _emit_progress(
+        item: SearchResult,
+        item_index: int,
+        total_items: int,
+        processed_items: int,
+        status: DownloadProgressStatus,
+        callback: DownloadProgressCallback | None,
+        *,
+        item_fraction: float | None = None,
+        downloaded_bytes: int | None = None,
+        total_bytes: int | None = None,
+    ) -> None:
+        if callback:
+            callback(
+                DownloadProgress(
+                    query=item.query,
+                    id=item.id,
+                    item_index=item_index,
+                    total_items=total_items,
+                    processed_items=processed_items,
+                    status=status,
+                    item_fraction=item_fraction,
+                    downloaded_bytes=downloaded_bytes,
+                    total_bytes=total_bytes,
+                )
+            )
+
+    def _error_result(
+        self,
+        item: SearchResult,
+        attempt: int,
+        error: Exception,
+        item_index: int,
+        total_items: int,
+        processed_items: int,
+        callback: DownloadProgressCallback | None,
+    ) -> DownloadResult:
+        self._emit_progress(
+            item,
+            item_index,
+            total_items,
+            processed_items + 1,
+            DownloadProgressStatus.ERROR,
+            callback,
+        )
+        return DownloadResult(
+            query=item.query,
+            id=item.id,
+            status=DownloadStatus.ERROR,
+            output_path=None,
+            attempts=attempt,
+            error=exception_diagnostic(error),
+        )

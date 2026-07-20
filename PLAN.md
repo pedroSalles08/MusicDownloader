@@ -17,11 +17,11 @@
 
 ## Etapa 2 — Serviços
 
-- [ ] Extrair configuração reutilizável do yt-dlp.
-- [ ] Implementar pesquisa sem download e mapeamento de metadados.
-- [ ] Implementar download MP3, capa opcional, hooks de progresso e resumo.
-- [ ] Implementar cancelamento cooperativo e continuação após falha.
-- [ ] Testar com fakes/mocks, incluindo rede, nenhum resultado e falha parcial.
+- [x] Extrair configuração reutilizável do yt-dlp.
+- [x] Implementar pesquisa sem download e mapeamento de metadados.
+- [x] Implementar download MP3, capa opcional, hooks de progresso e resumo.
+- [x] Implementar cancelamento cooperativo e continuação após falha.
+- [x] Testar com fakes/mocks, incluindo rede, nenhum resultado e falha parcial.
 
 ## Etapa 3 — Interface
 

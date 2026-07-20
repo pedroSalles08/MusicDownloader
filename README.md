@@ -2,8 +2,9 @@
 
 Aplicativo desktop Windows em construção para pesquisar, revisar e baixar em MP3 músicas que o usuário possua ou tenha autorização para baixar. O backend usa yt-dlp e FFmpeg; a interface será feita com PySide6.
 
-> Estado atual: núcleo de entradas implementado e testado. A interface, pesquisa,
-> download e executável ainda não foram implementados.
+> Estado atual: núcleo de entradas e serviços yt-dlp implementados e testados
+> com fakes. A interface e o executável ainda não foram implementados, e a
+> integração de rede real ainda aguarda validação manual.
 
 ## MVP planejado
 
@@ -37,7 +38,10 @@ O pacote `music_downloader` já oferece:
 - detecção de URL pública de playlist do Spotify;
 - saneamento de componentes de nome de arquivo para Windows, limitado por
   unidades UTF-16 sem cortar caracteres suplementares;
-- detecção injetável de FFmpeg e FFprobe.
+- detecção injetável de FFmpeg e FFprobe;
+- pesquisa de um resultado por query, sem download, com falhas isoladas;
+- download por URL já aprovada, MP3 192 kbps, metadados, capa opcional,
+  retries, progresso e cancelamento cooperativo.
 
 Essas APIs formam o núcleo de domínio e ainda não constituem um aplicativo
 executável para o usuário final.
@@ -50,9 +54,9 @@ executável para o usuário final.
 - Node no PATH para o suporte JavaScript atual do YouTube no yt-dlp;
 - aria2c opcional.
 
-PySide6, yt-dlp e PyInstaller serão adicionados nas etapas que implementarem a
-interface, os serviços e o empacotamento. Nenhum download de rede faz parte da
-etapa atual.
+yt-dlp já é dependência de runtime. PySide6 e PyInstaller serão adicionados nas
+etapas de interface e empacotamento. Os testes atuais não acessam a rede nem
+executam FFmpeg; ambos são substituídos por fakes nas verificações dos serviços.
 
 ## Referências do repositório
 

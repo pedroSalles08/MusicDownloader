@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,3 +101,94 @@ class MediaToolsStatus:
             f"Não foi possível encontrar {missing} no PATH. "
             "Instale o FFmpeg (que inclui o FFprobe) e reinicie o aplicativo."
         )
+
+
+class SearchStatus(str, Enum):
+    FOUND = "found"
+    NO_RESULT = "no_result"
+    ERROR = "error"
+
+
+@dataclass(frozen=True, slots=True)
+class SearchResult:
+    """One search outcome, including failures and empty searches."""
+
+    query: str
+    status: SearchStatus
+    title: str | None = None
+    channel: str | None = None
+    duration: float | None = None
+    id: str | None = None
+    url: str | None = None
+    thumbnail: str | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SearchProgress:
+    """Batch-level progress emitted after each completed search."""
+
+    processed_items: int
+    total_items: int
+    result: SearchResult
+
+
+@dataclass(frozen=True, slots=True)
+class SearchBatchResult:
+    results: tuple[SearchResult, ...]
+    cancelled: bool
+
+
+class DownloadStatus(str, Enum):
+    COMPLETED = "completed"
+    ERROR = "error"
+    CANCELLED = "cancelled"
+
+
+class DownloadProgressStatus(str, Enum):
+    DOWNLOADING = "downloading"
+    PROCESSING = "processing"
+    RETRYING = "retrying"
+    COMPLETED = "completed"
+    ERROR = "error"
+    CANCELLED = "cancelled"
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadProgress:
+    """Progress for the current item and its position in the whole batch."""
+
+    query: str
+    id: str | None
+    item_index: int
+    total_items: int
+    processed_items: int
+    status: DownloadProgressStatus
+    item_fraction: float | None = None
+    downloaded_bytes: int | None = None
+    total_bytes: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadResult:
+    query: str
+    id: str | None
+    status: DownloadStatus
+    output_path: Path | None
+    attempts: int
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadBatchResult:
+    results: tuple[DownloadResult, ...]
+    cancelled: bool
+    preflight_error: str | None = None
+
+    @property
+    def successful_count(self) -> int:
+        return sum(result.status is DownloadStatus.COMPLETED for result in self.results)
+
+    @property
+    def failed_count(self) -> int:
+        return sum(result.status is DownloadStatus.ERROR for result in self.results)
