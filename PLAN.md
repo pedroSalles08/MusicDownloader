@@ -70,7 +70,7 @@
 - [x] Criar pacote portátil e hashes SHA-256.
 - [x] Automatizar build e GitHub Release para tags `v*`.
 - [x] Validar instalador, atalho e desinstalação.
-- [ ] Publicar repositório e primeira release pública após QA independente.
+- [x] Publicar repositório e primeira release pública após QA independente.
 
 ## Estratégia de commits
 

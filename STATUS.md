@@ -301,7 +301,7 @@ permanece fora do MVP e não bloqueia a entrega. A variabilidade da pesquisa do
 YouTube exige revisão humana; nesta validação, a divergência de ID foi detectada
 e nenhum conteúdo ambíguo foi baixado.
 
-## Etapa 7 — Distribuição pública (em validação)
+## Etapa 7 — Distribuição pública (concluída)
 
 - Build hermético evita coletar DLLs expostas por runtimes de ferramentas no
   `PATH`; uma primeira tentativa contaminada falhou no QtCore e foi descartada.
@@ -333,3 +333,6 @@ e nenhum conteúdo ambíguo foi baixado.
   e documentação foram corrigidos; a publicação aguardava a nova aprovação.
 - Ciclo final de QA: **197 testes passaram**, hashes e smokes do instalado e do
   ZIP conferiram, atalhos e índice foram validados; **REVISOR_QA: APROVADO**.
+- Repositório público: <https://github.com/pedroSalles08/MusicDownloader>.
+- Primeira release pública: <https://github.com/pedroSalles08/MusicDownloader/releases/tag/v0.1.0>,
+  com instalador, ZIP portátil e `SHA256SUMS.txt` disponíveis para download.

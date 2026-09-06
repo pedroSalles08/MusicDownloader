@@ -57,7 +57,7 @@ Uma etapa só é aprovada com critérios verificáveis e revisão independente. 
 - [x] Build de release gera instalador, pacote portátil e hashes SHA-256.
 - [x] Workflow executa testes e publica os artefatos ao receber uma tag `v*`.
 - [x] Instalação, pesquisa do Windows, abertura e desinstalação são validadas.
-- [ ] Repositório e primeira GitHub Release estão públicos.
+- [x] Repositório e primeira GitHub Release estão públicos.
 - [x] Revisão independente termina em `APROVADO`.
 
 ## Evidência por etapa
