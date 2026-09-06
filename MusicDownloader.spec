@@ -6,6 +6,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 PROJECT_ROOT = Path(SPECPATH).resolve()
 SOURCE_ROOT = PROJECT_ROOT / "src"
+VERSION_INFO = PROJECT_ROOT / "packaging" / "version_info.txt"
 
 yt_dlp_hiddenimports = [
     module
@@ -42,6 +43,7 @@ executable = EXE(
     upx=False,
     console=False,
     disable_windowed_traceback=False,
+    version=str(VERSION_INFO),
 )
 
 distribution = COLLECT(

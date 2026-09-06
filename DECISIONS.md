@@ -38,7 +38,7 @@ O aplicativo importa arquivos Exportify e reconhece cabeçalhos normalizados. UR
 
 ## ADR-007 — Visual retrô por stylesheet Qt
 
-**Status:** aceita.
+**Status:** substituída pela ADR-011; preservada como histórico.
 
 O visual será centralizado em um stylesheet e tokens: creme/bege, verde-água, azul dessaturado, grafite e cores semânticas; bordas de 1–2 px, sombras/estados elevados discretos e fontes de sistema legíveis com títulos monoespaçados. A referência inspira a direção sem reproduzir o caos visual de páginas antigas.
 
@@ -48,3 +48,79 @@ O visual será centralizado em um stylesheet e tokens: creme/bege, verde-água, 
 
 PyInstaller gerará um executável `onedir` primeiro, por ser mais observável e iniciar mais rápido. O app detectará FFmpeg no PATH e, se futuramente binários forem incluídos, também no diretório empacotado. Um `onefile` poderá ser avaliado após o gate funcional.
 
+## ADR-009 — Entrada mista e expansão de playlists do YouTube
+
+**Status:** aceita.
+
+O serviço de pesquisa classifica apenas URLs HTTP(S) de hosts oficiais do
+YouTube. Nomes continuam usando `ytsearch1`; vídeos são resolvidos pela URL
+exata; playlists são consultadas sem download e expandidas, na ordem, em uma
+linha revisável por vídeo. A etapa de download continua recebendo somente as
+URLs individuais aprovadas, preservando a revisão humana e evitando acoplar a
+interface ao yt-dlp.
+
+## ADR-010 — Revisão ampliada dentro da janela principal
+
+**Status:** substituída pela ADR-011; preservada como histórico.
+
+As três seções permanecem em um `QSplitter` vertical redimensionável. Depois da
+pesquisa, entrada e atividade mantêm resumos compactos e a revisão recebe a
+maior área. O modo foco apenas alterna visibilidade e tamanhos dos painéis,
+preservando widgets, seleção, rolagem e dados; não cria outra janela nem altera
+os serviços. Detalhes da faixa reutilizam a edição e pesquisa individual já
+existentes.
+
+## ADR-011 — Interface dark com fluxo progressivo
+
+**Status:** aceita.
+
+A aplicação mantém PySide6 Widgets e a moldura nativa do Windows. O conteúdo
+principal usa `QStackedWidget` para exibir Adicionar, Pesquisar, Revisar, Baixar
+e Concluído como estados exclusivos. Não são adotados sidebar, dashboard,
+janela frameless, thumbnails remotas ou tela de configurações nesta versão.
+
+A revisão usa `QAbstractListModel` e `QStyledItemDelegate`. O modelo é um
+adaptador de apresentação sobre `SearchResult`: preserva ordem, URL/ID aprovado,
+seleção, edição e progresso sem alterar serviços, workers ou tipos de domínio.
+Tokens, popovers e ícones SVG locais ficam restritos à camada de UI.
+
+Essa decisão substitui a composição simultânea baseada em `QSplitter` e
+`QTableWidget`. Parsing, CSV, pesquisa, playlists, download, cookies, FFmpeg,
+retries, cancelamento, guardas de geração e empacotamento permanecem protegidos.
+
+## ADR-012 — Perfis fechados de saída de mídia
+
+**Status:** aceita.
+
+Áudio e vídeo usam `DownloadProfile` e enums de domínio. A interface escolhe
+somente valores previamente permitidos; não aceita expressões `format` do
+yt-dlp, IDs de formato ou argumentos FFmpeg digitados pelo usuário.
+
+O padrão permanece MP3 192 kbps. Áudio pode ser convertido para AAC, ALAC,
+FLAC, M4A, MP3, Opus, Vorbis ou WAV. Vídeo oferece MP4 compatível com
+recodificação H.264/AAC, MP4 rápido sem recodificação, WebM e formato original,
+com resolução máxima controlada. O caminho final usa a extensão conhecida pelo
+perfil ou, no modo original, o `filepath` devolvido pelo yt-dlp.
+
+Thumbnail é recusada no preflight para WAV e formato original, cujos contêineres
+não oferecem uma garantia uniforme. MP4 compatível usa contêiner intermediário
+MKV para assegurar que a etapa de conversão seja executada; MP4 rápido prefere
+streams MP4/M4A e evita a perda de qualidade de uma recodificação.
+
+## ADR-013 — Instalador e distribuição pública
+
+**Status:** aceita.
+
+A distribuição oficial do Windows usa o pacote `onedir` dentro de um instalador
+Inno Setup por usuário. O instalador grava em `%LOCALAPPDATA%`, não pede
+privilégios administrativos e cria um atalho `Music Downloader` no Menu
+Iniciar, permitindo localizar o app na pesquisa do Windows. O atalho da Área de
+Trabalho fica selecionado por padrão como fallback para instalações cujo índice
+do Menu Iniciar esteja inconsistente. Atalhos e processo usam a mesma identidade
+explícita e estável `PedroSalles08.MusicDownloader`, em formato PascalCase
+conforme a recomendação para aplicativos Win32 não empacotados.
+
+Cada release também oferece um ZIP portátil e hashes SHA-256. Tags `v*` acionam
+um workflow Windows que executa os testes, recompila os artefatos e cria uma
+GitHub Release. Assinatura de código permanece uma evolução futura e essa
+limitação é informada ao usuário antes do download.

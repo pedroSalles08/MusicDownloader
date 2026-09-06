@@ -33,3 +33,12 @@ def test_empty_input_has_one_ignored_segment() -> None:
 
     assert result.queries == ()
     assert result.empty_count == 1
+
+
+def test_keeps_mixed_names_youtube_video_and_playlist_links() -> None:
+    video = "https://youtu.be/video-id"
+    playlist = "https://www.youtube.com/playlist?list=PL123"
+
+    result = parse_semicolon_list(f"Song Artist; {video}; {playlist}")
+
+    assert result.queries == ("Song Artist", video, playlist)

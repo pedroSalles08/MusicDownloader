@@ -26,14 +26,21 @@ if (-not $SkipInstall) {
 
 Push-Location $projectRoot
 try {
-    & $venvPython -m PyInstaller `
-        --noconfirm `
-        --clean `
-        --distpath (Join-Path $projectRoot "dist") `
-        --workpath (Join-Path $projectRoot "build") `
-        $specPath
-    if ($LASTEXITCODE -ne 0) {
-        throw "O PyInstaller não concluiu o build."
+    $originalPath = $env:Path
+    try {
+        # Avoid collecting unrelated DLLs exposed by developer-tool runtimes.
+        $env:Path = "$env:SystemRoot\System32;$env:SystemRoot"
+        & $venvPython -m PyInstaller `
+            --noconfirm `
+            --clean `
+            --distpath (Join-Path $projectRoot "dist") `
+            --workpath (Join-Path $projectRoot "build") `
+            $specPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "O PyInstaller não concluiu o build."
+        }
+    } finally {
+        $env:Path = $originalPath
     }
 } finally {
     Pop-Location

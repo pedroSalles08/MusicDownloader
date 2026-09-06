@@ -1,0 +1,170 @@
+# Resource object code (Python 3)
+# Created by: object code
+# Created by: The Resource Compiler for Qt version 6.11.1
+# WARNING! All changes made in this file will be lost!
+
+from PySide6 import QtCore
+
+qt_resource_data = b"\
+\x00\x00\x01\xe3\
+<\
+svg xmlns=\x22http:\
+//www.w3.org/200\
+0/svg\x22 width=\x2220\
+\x22 height=\x2220\x22 vi\
+ewBox=\x220 0 20 20\
+\x22 fill=\x22none\x22>\x0a \
+ <path d=\x22M8 14.\
+25V5.5l7-1.5v8.7\
+5\x22 stroke=\x22#A1A1\
+A6\x22 stroke-width\
+=\x221.5\x22 stroke-li\
+necap=\x22round\x22 st\
+roke-linejoin=\x22r\
+ound\x22/>\x0a  <path \
+d=\x22M8 7.5l7-1.5\x22\
+ stroke=\x22#A1A1A6\
+\x22 stroke-width=\x22\
+1.5\x22 stroke-line\
+cap=\x22round\x22/>\x0a  \
+<ellipse cx=\x225.5\
+\x22 cy=\x2214.5\x22 rx=\x22\
+2.5\x22 ry=\x221.75\x22 s\
+troke=\x22#A1A1A6\x22 \
+stroke-width=\x221.\
+5\x22/>\x0a  <ellipse \
+cx=\x2212.5\x22 cy=\x2213\
+\x22 rx=\x222.5\x22 ry=\x221\
+.75\x22 stroke=\x22#A1\
+A1A6\x22 stroke-wid\
+th=\x221.5\x22/>\x0a</svg\
+>\x0a\
+\x00\x00\x01/\
+<\
+svg xmlns=\x22http:\
+//www.w3.org/200\
+0/svg\x22 width=\x2220\
+\x22 height=\x2220\x22 vi\
+ewBox=\x220 0 20 20\
+\x22 fill=\x22none\x22>\x0a \
+ <path d=\x22M2.75 \
+5.75c0-.83.67-1.\
+5 1.5-1.5H8l1.5 \
+1.5h6.25c.83 0 1\
+.5.67 1.5 1.5v7.\
+5c0 .83-.67 1.5-\
+1.5 1.5H4.25c-.8\
+3 0-1.5-.67-1.5-\
+1.5v-9Z\x22 stroke=\
+\x22#A1A1A6\x22 stroke\
+-width=\x221.5\x22 str\
+oke-linejoin=\x22ro\
+und\x22/>\x0a</svg>\x0a\
+\x00\x00\x00\xdd\
+<\
+svg xmlns=\x22http:\
+//www.w3.org/200\
+0/svg\x22 width=\x2216\
+\x22 height=\x2216\x22 vi\
+ewBox=\x220 0 16 16\
+\x22 fill=\x22none\x22>\x0a \
+ <path d=\x22M3.5 8\
+.25 6.5 11l6-6\x22 \
+stroke=\x22#FFFFFF\x22\
+ stroke-width=\x221\
+.8\x22 stroke-linec\
+ap=\x22round\x22 strok\
+e-linejoin=\x22roun\
+d\x22/>\x0a</svg>\x0a\
+\x00\x00\x01D\
+<\
+svg xmlns=\x22http:\
+//www.w3.org/200\
+0/svg\x22 width=\x2228\
+\x22 height=\x2228\x22 vi\
+ewBox=\x220 0 28 28\
+\x22 fill=\x22none\x22>\x0a \
+ <path d=\x22M14 5 \
+24 22H4L14 5Z\x22 s\
+troke=\x22#FF9F0A\x22 \
+stroke-width=\x222\x22\
+ stroke-linejoin\
+=\x22round\x22/>\x0a  <pa\
+th d=\x22M14 11v5\x22 \
+stroke=\x22#FF9F0A\x22\
+ stroke-width=\x222\
+\x22 stroke-linecap\
+=\x22round\x22/>\x0a  <ci\
+rcle cx=\x2214\x22 cy=\
+\x2219\x22 r=\x221\x22 fill=\
+\x22#FF9F0A\x22/>\x0a</sv\
+g>\x0a\
+\x00\x00\x00\xdd\
+<\
+svg xmlns=\x22http:\
+//www.w3.org/200\
+0/svg\x22 width=\x2228\
+\x22 height=\x2228\x22 vi\
+ewBox=\x220 0 28 28\
+\x22 fill=\x22none\x22>\x0a \
+ <path d=\x22m7 14.\
+5 4.4 4.1L21 9\x22 \
+stroke=\x22#32D74B\x22\
+ stroke-width=\x222\
+.6\x22 stroke-linec\
+ap=\x22round\x22 strok\
+e-linejoin=\x22roun\
+d\x22/>\x0a</svg>\x0a\
+"
+
+qt_resource_name = b"\
+\x00\x05\
+\x00o\xa6S\
+\x00i\
+\x00c\x00o\x00n\x00s\
+\x00\x09\
+\x09\xf6\xb3G\
+\x00m\
+\x00u\x00s\x00i\x00c\x00.\x00s\x00v\x00g\
+\x00\x0a\
+\x0a\xc8\xf6\x87\
+\x00f\
+\x00o\x00l\x00d\x00e\x00r\x00.\x00s\x00v\x00g\
+\x00\x09\
+\x0b\x9e\x89\x07\
+\x00c\
+\x00h\x00e\x00c\x00k\x00.\x00s\x00v\x00g\
+\x00\x0b\
+\x00\xb5Hg\
+\x00w\
+\x00a\x00r\x00n\x00i\x00n\x00g\x00.\x00s\x00v\x00g\
+\x00\x0b\
+\x0cS)\xe7\
+\x00s\
+\x00u\x00c\x00c\x00e\x00s\x00s\x00.\x00s\x00v\x00g\
+"
+
+qt_resource_struct = b"\
+\x00\x00\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x01\
+\x00\x00\x00\x00\x00\x00\x00\x00\
+\x00\x00\x00\x00\x00\x02\x00\x00\x00\x05\x00\x00\x00\x02\
+\x00\x00\x00\x00\x00\x00\x00\x00\
+\x00\x00\x00Z\x00\x00\x00\x00\x00\x01\x00\x00\x03\xfb\
+\x00\x00\x01\xa0\x10\xbf\xf4h\
+\x00\x00\x00\x10\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\
+\x00\x00\x01\xa0\x10\xb3>\xb5\
+\x00\x00\x00(\x00\x00\x00\x00\x00\x01\x00\x00\x01\xe7\
+\x00\x00\x01\xa0\x10\xb3>\xb6\
+\x00\x00\x00B\x00\x00\x00\x00\x00\x01\x00\x00\x03\x1a\
+\x00\x00\x01\xa0\x10\xb3>\xb5\
+\x00\x00\x00v\x00\x00\x00\x00\x00\x01\x00\x00\x05C\
+\x00\x00\x01\xa0\x10\xb3>\xb5\
+"
+
+def qInitResources():
+    QtCore.qRegisterResourceData(0x03, qt_resource_struct, qt_resource_name, qt_resource_data)
+
+def qCleanupResources():
+    QtCore.qUnregisterResourceData(0x03, qt_resource_struct, qt_resource_name, qt_resource_data)
+
+qInitResources()

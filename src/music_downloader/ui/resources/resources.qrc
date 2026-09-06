@@ -1,0 +1,9 @@
+<RCC>
+  <qresource prefix="/icons">
+    <file alias="music.svg">icons/music.svg</file>
+    <file alias="check.svg">icons/check.svg</file>
+    <file alias="success.svg">icons/success.svg</file>
+    <file alias="warning.svg">icons/warning.svg</file>
+    <file alias="folder.svg">icons/folder.svg</file>
+  </qresource>
+</RCC>

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 from music_downloader.cancellation import CancellationToken
 from music_downloader.diagnostics import exception_diagnostic
@@ -32,6 +33,57 @@ def search_options() -> dict[str, Any]:
     }
 
 
+def playlist_options() -> dict[str, Any]:
+    """Return metadata-only options that expand a YouTube playlist."""
+
+    options = search_options()
+    options.pop("noplaylist")
+    options.update(
+        {
+            "extract_flat": "in_playlist",
+            "ignoreerrors": True,
+            "lazy_playlist": True,
+        }
+    )
+    return options
+
+
+def _youtube_url_kind(value: str) -> str | None:
+    """Classify supported YouTube video and playlist URLs."""
+
+    try:
+        parsed = urlsplit(value.strip())
+        hostname = (parsed.hostname or "").rstrip(".").casefold()
+    except ValueError:
+        return None
+
+    if parsed.scheme.casefold() not in {"http", "https"}:
+        return None
+    is_youtube_host = hostname == "youtube.com" or hostname.endswith(
+        ".youtube.com"
+    )
+    if not (is_youtube_host or hostname == "youtu.be"):
+        return None
+
+    query = parse_qs(parsed.query)
+    if any(identifier.strip() for identifier in query.get("list", [])):
+        return "playlist"
+
+    parts = tuple(part for part in parsed.path.split("/") if part)
+    if hostname == "youtu.be":
+        return "video" if parts else None
+    if parsed.path.rstrip("/").casefold() == "/watch":
+        return "video" if any(query.get("v", [])) else None
+    if len(parts) >= 2 and parts[0].casefold() in {
+        "embed",
+        "live",
+        "shorts",
+        "v",
+    }:
+        return "video"
+    return None
+
+
 def _optional_text(value: object) -> str | None:
     if value is None:
         return None
@@ -40,9 +92,15 @@ def _optional_text(value: object) -> str | None:
 
 
 def _entry_url(entry: Mapping[str, Any]) -> str | None:
-    url = _optional_text(entry.get("webpage_url")) or _optional_text(entry.get("url"))
-    if url:
-        return url
+    for field in ("webpage_url", "url"):
+        url = _optional_text(entry.get(field))
+        if not url:
+            continue
+        try:
+            if urlsplit(url).scheme.casefold() in {"http", "https"}:
+                return url
+        except ValueError:
+            continue
 
     media_id = _optional_text(entry.get("id"))
     if media_id:
@@ -119,27 +177,39 @@ class SearchService:
         pending = tuple(queries)
         results: list[SearchResult] = []
 
-        for query in pending:
+        for input_index, query in enumerate(pending, start=1):
             if token.cancelled:
                 break
 
-            result = self._search_one(query)
-            results.append(result)
-            if progress_callback:
-                progress_callback(
-                    SearchProgress(
-                        processed_items=len(results),
-                        total_items=len(pending),
-                        result=result,
+            query_results = self._resolve_one(query, cancellation=token)
+            for result in query_results:
+                if token.cancelled:
+                    break
+                results.append(result)
+                if progress_callback:
+                    progress_callback(
+                        SearchProgress(
+                            processed_items=input_index,
+                            total_items=len(pending),
+                            result=result,
+                        )
                     )
-                )
 
         return SearchBatchResult(results=tuple(results), cancelled=token.cancelled)
 
-    def _search_one(self, query: str) -> SearchResult:
+    def _resolve_one(
+        self, query: str, *, cancellation: CancellationToken
+    ) -> Iterable[SearchResult]:
+        kind = _youtube_url_kind(query)
+        if kind == "playlist":
+            return self._resolve_playlist(query, cancellation=cancellation)
+        return (self._resolve_single(query, direct=kind == "video"),)
+
+    def _resolve_single(self, query: str, *, direct: bool) -> SearchResult:
         try:
             with self._ytdl_factory(search_options()) as ydl:
-                info = ydl.extract_info(f"ytsearch1:{query}", download=False)
+                locator = query if direct else f"ytsearch1:{query}"
+                info = ydl.extract_info(locator, download=False)
             entry = _first_entry(info)
             if entry is None:
                 return SearchResult(query=query, status=SearchStatus.NO_RESULT)
@@ -150,3 +220,36 @@ class SearchService:
                 status=SearchStatus.ERROR,
                 error=exception_diagnostic(error),
             )
+
+    def _resolve_playlist(
+        self, query: str, *, cancellation: CancellationToken
+    ) -> Iterable[SearchResult]:
+        try:
+            with self._ytdl_factory(playlist_options()) as ydl:
+                info = ydl.extract_info(query, download=False)
+
+                found = False
+                entries = info.get("entries") if info else None
+                if entries is not None:
+                    entry_iterator = iter(entries)
+                    while not cancellation.cancelled:
+                        try:
+                            entry = next(entry_iterator)
+                        except StopIteration:
+                            break
+                        if isinstance(entry, Mapping):
+                            entry_url = _entry_url(entry)
+                            if entry_url:
+                                found = True
+                                # Each expanded row keeps its own direct URL so
+                                # researching it cannot reopen the whole playlist.
+                                yield _found_result(entry_url, entry)
+                if not found and not cancellation.cancelled:
+                    yield SearchResult(query=query, status=SearchStatus.NO_RESULT)
+        except Exception as error:
+            if not cancellation.cancelled:
+                yield SearchResult(
+                    query=query,
+                    status=SearchStatus.ERROR,
+                    error=exception_diagnostic(error),
+                )

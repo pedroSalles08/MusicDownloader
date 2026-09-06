@@ -1,39 +1,20 @@
-"""Main PySide6 window for the complete prepare/review/download flow."""
+"""Main PySide6 window for the progressive prepare/review/download flow."""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from dataclasses import replace
+from enum import Enum
 from pathlib import Path
 import shutil
 from typing import Any
 
-from PySide6.QtCore import QThread, QTimer, Qt
-from PySide6.QtGui import QCloseEvent
-from PySide6.QtWidgets import (
-    QAbstractItemView,
-    QCheckBox,
-    QFileDialog,
-    QFrame,
-    QGridLayout,
-    QGroupBox,
-    QHBoxLayout,
-    QHeaderView,
-    QLabel,
-    QLineEdit,
-    QMainWindow,
-    QPlainTextEdit,
-    QProgressBar,
-    QPushButton,
-    QSplitter,
-    QTableWidget,
-    QTableWidgetItem,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtCore import QEasingCurve, QModelIndex, QPropertyAnimation, QThread, QTimer, Qt, QUrl
+from PySide6.QtGui import QCloseEvent, QDesktopServices
+from PySide6.QtWidgets import QFileDialog, QGraphicsOpacityEffect, QMainWindow, QMenu
 
 from music_downloader.csv_importer import import_exportify_csv
 from music_downloader.diagnostics import exception_diagnostic
+from music_downloader.download_profiles import DEFAULT_DOWNLOAD_PROFILE, DownloadProfile, MediaKind
 from music_downloader.download_service import DownloadService
 from music_downloader.list_parser import parse_semicolon_list
 from music_downloader.models import (
@@ -50,22 +31,36 @@ from music_downloader.models import (
 )
 from music_downloader.search_service import SearchService
 from music_downloader.spotify import is_spotify_playlist_url
+from music_downloader.ui.pages import (
+    AddPage,
+    AppShell,
+    CompletionPage,
+    DownloadPage,
+    ImportPopover,
+    OptionsPopover,
+    ReviewPage,
+    SearchPage,
+)
+from music_downloader.ui.review_model import ReviewItemDelegate, ReviewListModel, format_duration
 from music_downloader.ui.styles import APP_STYLESHEET
 from music_downloader.workers import DownloadWorker, SearchWorker
 
 CsvImporter = Callable[[str | Path], CsvImportResult]
 ExecutableResolver = Callable[[str], str | None]
 
-_SEARCH_STATUS_TEXT = {
-    SearchStatus.FOUND: "Encontrado",
-    SearchStatus.NO_RESULT: "Sem resultado",
-    SearchStatus.ERROR: "Erro",
-}
+
+class FlowStage(str, Enum):
+    ADD = "add"
+    SEARCHING = "searching"
+    REVIEW = "review"
+    DOWNLOADING = "downloading"
+    COMPLETE = "complete"
+
 
 _DOWNLOAD_STATUS_TEXT = {
-    DownloadProgressStatus.DOWNLOADING: "Baixando",
-    DownloadProgressStatus.PROCESSING: "Convertendo",
-    DownloadProgressStatus.RETRYING: "Nova tentativa",
+    DownloadProgressStatus.DOWNLOADING: "Baixando…",
+    DownloadProgressStatus.PROCESSING: "Convertendo…",
+    DownloadProgressStatus.RETRYING: "Tentando novamente…",
     DownloadProgressStatus.COMPLETED: "Concluído",
     DownloadProgressStatus.ERROR: "Falha",
     DownloadProgressStatus.CANCELLED: "Cancelado",
@@ -73,7 +68,7 @@ _DOWNLOAD_STATUS_TEXT = {
 
 
 class MainWindow(QMainWindow):
-    """Single-window desktop flow with injectable services for offline tests."""
+    """Native Windows shell with injectable services for deterministic tests."""
 
     def __init__(
         self,
@@ -89,7 +84,6 @@ class MainWindow(QMainWindow):
         self.csv_importer = csv_importer
         self.executable_resolver = executable_resolver
 
-        self.search_results: list[SearchResult] = []
         self.last_parse_result: QueryListResult | None = None
         self.last_search_batch: SearchBatchResult | None = None
         self.last_download_batch: DownloadBatchResult | None = None
@@ -98,239 +92,230 @@ class MainWindow(QMainWindow):
         self._active_thread: QThread | None = None
         self._active_worker: SearchWorker | DownloadWorker | None = None
         self._operation: str | None = None
+        self._busy = False
+        self._close_pending = False
         self._generation_counter = 0
         self._active_generation: int | None = None
+
         self._search_target_row: int | None = None
         self._search_queries: tuple[str, ...] = ()
         self._search_received: dict[int, SearchResult] = {}
         self._search_terminal = True
         self._search_max_processed = 0
+        self._search_found_count = 0
         self._research_previous_result: SearchResult | None = None
+
         self._download_rows: list[int] = []
+        self._download_items: list[SearchResult] = []
         self._download_terminal = True
         self._download_terminal_items: set[int] = set()
         self._download_max_total_value = 0
-        self._updating_table = False
-        self._busy = False
-        self._close_pending = False
+        self._download_max_processed = 0
+        self._download_profile = DEFAULT_DOWNLOAD_PROFILE
 
-        self.setWindowTitle("Music Downloader — preparação autorizada")
-        self.resize(1180, 780)
-        self.setMinimumSize(900, 640)
+        self._stage = FlowStage.ADD
+        self._stage_before_operation = FlowStage.ADD
+        self._page_animation: QPropertyAnimation | None = None
+
+        self.setWindowTitle("Music Downloader")
+        self.resize(1060, 760)
+        self.setMinimumSize(720, 600)
         self.setStyleSheet(APP_STYLESHEET)
         self._build_ui()
         self._connect_signals()
         self._configure_accessibility()
-        self.statusBar().showMessage("Pronto para preparar uma lista autorizada.")
+        self._transition_to(FlowStage.ADD)
+        self.statusBar().hide()
 
     @property
     def is_busy(self) -> bool:
         return self._busy
 
+    @property
+    def stage(self) -> FlowStage:
+        return self._stage
+
+    @property
+    def search_results(self) -> list[SearchResult]:
+        return self.review_model.results
+
     def _build_ui(self) -> None:
-        central = QWidget(self)
-        root = QVBoxLayout(central)
-        root.setContentsMargins(10, 10, 10, 8)
-        root.setSpacing(8)
+        self.shell = AppShell(self)
+        self.add_page = AddPage()
+        self.search_page = SearchPage()
+        self.review_page = ReviewPage()
+        self.download_page = DownloadPage()
+        self.completion_page = CompletionPage()
 
-        header = QFrame()
-        header.setObjectName("headerFrame")
-        header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(14, 8, 14, 8)
-        title = QLabel("MUSIC DOWNLOADER // DESKTOP")
-        title.setObjectName("appTitle")
-        subtitle = QLabel(
-            "Prepare, revise e baixe apenas músicas que você possui ou pode baixar."
-        )
-        subtitle.setObjectName("appSubtitle")
-        header_layout.addWidget(title)
-        header_layout.addWidget(subtitle)
-        root.addWidget(header)
+        self._pages = {
+            FlowStage.ADD: self.add_page,
+            FlowStage.SEARCHING: self.search_page,
+            FlowStage.REVIEW: self.review_page,
+            FlowStage.DOWNLOADING: self.download_page,
+            FlowStage.COMPLETE: self.completion_page,
+        }
+        for page in self._pages.values():
+            self.shell.stack.addWidget(page)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(self._build_input_panel())
-        splitter.addWidget(self._build_review_panel())
-        splitter.addWidget(self._build_activity_panel())
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 4)
-        splitter.setStretchFactor(2, 2)
-        splitter.setSizes([230, 330, 180])
-        root.addWidget(splitter, 1)
+        self.review_model = ReviewListModel(self)
+        self.review_delegate = ReviewItemDelegate(self.review_page.list_view)
+        self.review_page.list_view.setModel(self.review_model)
+        self.review_page.list_view.setItemDelegate(self.review_delegate)
 
-        self.setCentralWidget(central)
+        self.import_popover = ImportPopover(self)
+        self.options_popover = OptionsPopover(self)
+        self.setCentralWidget(self.shell)
 
-    def _build_input_panel(self) -> QWidget:
-        group = QGroupBox("01 // ENTRADA")
-        layout = QGridLayout(group)
-        layout.setContentsMargins(10, 18, 10, 8)
-        layout.setHorizontalSpacing(8)
-        layout.setVerticalSpacing(6)
-
-        self.input_edit = QPlainTextEdit()
-        self.input_edit.setPlaceholderText(
-            "Ex.: Save a Prayer Duran Duran; The Winner Takes It All ABBA"
-        )
-        self.input_edit.setMaximumBlockCount(10000)
-        self.input_label = QLabel("&Lista separada por ponto e vírgula (;):")
-        self.input_label.setBuddy(self.input_edit)
-        layout.addWidget(self.input_label, 0, 0, 1, 4)
-        layout.addWidget(self.input_edit, 1, 0, 1, 4)
-
-        self.import_csv_button = QPushButton("Importar CSV…")
-        layout.addWidget(self.import_csv_button, 2, 0)
-        self.spotify_edit = QLineEdit()
-        self.spotify_edit.setPlaceholderText("https://open.spotify.com/playlist/…")
-        self.spotify_label = QLabel("&Playlist Spotify:")
-        self.spotify_label.setBuddy(self.spotify_edit)
-        layout.addWidget(self.spotify_label, 2, 1)
-        layout.addWidget(self.spotify_edit, 2, 2, 1, 2)
-
-        self.spotify_hint_label = QLabel(
-            "Links são detectados; no MVP, exporte pelo Exportify e importe o CSV."
-        )
-        self.spotify_hint_label.setObjectName("spotifyHint")
-        self.spotify_hint_label.setWordWrap(True)
-        layout.addWidget(self.spotify_hint_label, 3, 0, 1, 4)
-
-        self.destination_edit = QLineEdit()
-        self.destination_edit.setPlaceholderText("Escolha onde salvar os MP3")
-        self.destination_label = QLabel("&Destino:")
-        self.destination_label.setBuddy(self.destination_edit)
-        layout.addWidget(self.destination_label, 4, 0)
-        layout.addWidget(self.destination_edit, 4, 1, 1, 2)
-        self.browse_button = QPushButton("Escolher…")
-        layout.addWidget(self.browse_button, 4, 3)
-
-        self.cover_checkbox = QCheckBox("Incorporar thumbnail como capa")
-        layout.addWidget(self.cover_checkbox, 5, 0, 1, 2)
-        self.search_button = QPushButton("Pesquisar músicas")
-        self.search_button.setObjectName("primaryButton")
-        layout.addWidget(self.search_button, 5, 2)
-        self.cancel_button = QPushButton("Cancelar operação")
-        self.cancel_button.setObjectName("dangerButton")
-        self.cancel_button.setEnabled(False)
-        layout.addWidget(self.cancel_button, 5, 3)
-        layout.setColumnStretch(2, 1)
-        return group
-
-    def _build_review_panel(self) -> QWidget:
-        group = QGroupBox("02 // REVISÃO")
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(8, 18, 8, 8)
-        self.review_table = QTableWidget(0, 7)
-        self.review_table.setHorizontalHeaderLabels(
-            [
-                "Baixar",
-                "Consulta",
-                "Título encontrado",
-                "Canal",
-                "Duração",
-                "Status",
-                "Progresso",
-            ]
-        )
-        self.review_table.setAlternatingRowColors(True)
-        self.review_table.setSelectionBehavior(
-            QAbstractItemView.SelectionBehavior.SelectRows
-        )
-        self.review_table.setSelectionMode(
-            QAbstractItemView.SelectionMode.SingleSelection
-        )
-        self.review_table.verticalHeader().setVisible(False)
-        header = self.review_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        for column in (3, 4, 5, 6):
-            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
-        layout.addWidget(self.review_table, 1)
-
-        actions = QHBoxLayout()
-        self.select_found_button = QPushButton("Marcar encontrados")
-        self.clear_selection_button = QPushButton("Desmarcar todos")
-        self.research_button = QPushButton("Pesquisar linha selecionada")
-        self.download_button = QPushButton("Baixar selecionadas")
-        self.download_button.setObjectName("primaryButton")
-        self.download_button.setEnabled(False)
-        actions.addWidget(self.select_found_button)
-        actions.addWidget(self.clear_selection_button)
-        actions.addWidget(self.research_button)
-        actions.addStretch(1)
-        actions.addWidget(self.download_button)
-        layout.addLayout(actions)
-        return group
-
-    def _build_activity_panel(self) -> QWidget:
-        group = QGroupBox("03 // ATIVIDADE")
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(8, 18, 8, 8)
-        self.total_progress = QProgressBar()
-        self.total_progress.setRange(0, 100)
-        self.total_progress.setValue(0)
-        layout.addWidget(self.total_progress)
-        self.summary_label = QLabel("Nenhuma operação executada nesta sessão.")
-        self.summary_label.setObjectName("summaryLabel")
-        self.summary_label.setWordWrap(True)
-        layout.addWidget(self.summary_label)
-        self.log_edit = QPlainTextEdit()
-        self.log_edit.setReadOnly(True)
-        self.log_edit.setMaximumBlockCount(500)
-        self.log_edit.setPlaceholderText("Eventos e falhas resumidas aparecem aqui.")
-        layout.addWidget(self.log_edit, 1)
-        return group
+        # Stable aliases used by integrations and existing tests.
+        self.input_edit = self.add_page.input_edit
+        self.destination_edit = self.add_page.destination_edit
+        self.browse_button = self.add_page.browse_button
+        self.import_csv_button = self.add_page.import_button
+        self.spotify_edit = self.import_popover.spotify_edit
+        self.spotify_hint_label = self.import_popover.spotify_hint_label
+        self.media_kind_combo = self.options_popover.media_kind_combo
+        self.audio_format_combo = self.options_popover.audio_format_combo
+        self.audio_quality_combo = self.options_popover.audio_quality_combo
+        self.video_format_combo = self.options_popover.video_format_combo
+        self.video_resolution_combo = self.options_popover.video_resolution_combo
+        self.cover_checkbox = self.options_popover.cover_checkbox
+        self.cookie_browser_combo = self.options_popover.cookie_browser_combo
+        self.search_button = self.add_page.search_button
+        self.cancel_button = self.search_page.cancel_button
+        self.review_list = self.review_page.list_view
+        self.select_found_button = self.review_page.select_found_button
+        self.clear_selection_button = self.review_page.clear_selection_button
+        self.research_button = self.review_page.research_button
+        self.download_button = self.review_page.download_button
+        self.review_cancel_button = self.download_page.cancel_button
+        self.total_progress = self.download_page.progress_bar
+        self.log_edit = self.download_page.log_edit
+        self.summary_label = self.completion_page.summary_label
 
     def _connect_signals(self) -> None:
-        self.import_csv_button.clicked.connect(self.choose_csv)
-        self.spotify_edit.textChanged.connect(self.process_spotify_text)
-        self.browse_button.clicked.connect(self.choose_destination)
-        self.search_button.clicked.connect(self.prepare_and_search)
-        self.cancel_button.clicked.connect(self.cancel_active_operation)
-        self.select_found_button.clicked.connect(self.select_all_found)
-        self.clear_selection_button.clicked.connect(self.clear_selection)
-        self.research_button.clicked.connect(self.research_current_row)
-        self.download_button.clicked.connect(self.start_download)
-        self.review_table.itemChanged.connect(self._on_table_item_changed)
-        self.review_table.itemSelectionChanged.connect(self._update_action_buttons)
+        self.add_page.import_button.clicked.connect(self._show_import_popover)
+        self.add_page.options_button.clicked.connect(self._show_options_from_add)
+        self.add_page.browse_button.clicked.connect(self.choose_destination)
+        self.add_page.search_button.clicked.connect(self.prepare_and_search)
+        self.add_page.destination_edit.textChanged.connect(self._destination_changed)
+
+        self.import_popover.csvRequested.connect(self.choose_csv)
+        self.import_popover.spotify_edit.textChanged.connect(self.process_spotify_text)
+
+        self.options_popover.profileChanged.connect(self._on_profile_changed)
+
+        self.search_page.cancel_button.clicked.connect(self.cancel_active_operation)
+
+        self.review_page.back_button.clicked.connect(lambda: self._transition_to(FlowStage.ADD))
+        self.review_page.options_button.clicked.connect(self._show_options_from_review)
+        self.review_page.change_destination_button.clicked.connect(self.choose_destination)
+        self.review_page.select_found_button.clicked.connect(self.select_all_found)
+        self.review_page.clear_selection_button.clicked.connect(self.clear_selection)
+        self.review_page.more_button.clicked.connect(self._show_current_row_menu)
+        self.review_page.download_button.clicked.connect(self.start_download)
+        self.review_page.editor_cancel_button.clicked.connect(self.review_page.editor.hide)
+        self.review_page.research_button.clicked.connect(self.research_from_editor)
+        self.review_page.list_view.doubleClicked.connect(self._open_editor)
+        self.review_page.list_view.customContextMenuRequested.connect(
+            self._show_context_menu
+        )
+        self.review_page.list_view.selectionModel().currentChanged.connect(
+            self._on_current_review_changed
+        )
+        self.review_delegate.actionsRequested.connect(self._show_delegate_menu)
+        self.review_model.selectionCountChanged.connect(self._selection_changed)
+
+        self.download_page.cancel_button.clicked.connect(self.cancel_active_operation)
+        self.download_page.details_button.clicked.connect(self.download_page.toggle_details)
+
+        self.completion_page.failures_button.clicked.connect(
+            self.completion_page.toggle_failures
+        )
+        self.completion_page.open_folder_button.clicked.connect(self.open_destination_folder)
+        self.completion_page.new_operation_button.clicked.connect(self.start_new_operation)
 
     def _configure_accessibility(self) -> None:
-        self.input_edit.setAccessibleName("Lista de músicas")
+        self.input_edit.setAccessibleName("Músicas e links")
         self.input_edit.setAccessibleDescription(
-            "Digite consultas separadas por ponto e vírgula ou importe um CSV."
-        )
-        self.spotify_edit.setAccessibleName("Link público da playlist Spotify")
-        self.spotify_edit.setAccessibleDescription(
-            "Detecta playlists e orienta a exportação pelo Exportify."
+            "Digite músicas e links de vídeos ou playlists do YouTube separados por ponto e vírgula."
         )
         self.destination_edit.setAccessibleName("Pasta de destino")
         self.destination_edit.setAccessibleDescription(
-            "Pasta na qual os arquivos MP3 autorizados serão salvos."
+            "Pasta na qual os arquivos autorizados serão salvos."
         )
-        self.review_table.setAccessibleName("Tabela de revisão das músicas")
-        self.review_table.setAccessibleDescription(
-            "Permite editar consultas, selecionar resultados e acompanhar estados."
+        self.spotify_edit.setAccessibleName("Playlist do Spotify")
+        self.spotify_edit.setAccessibleDescription(
+            "Valida a URL e orienta a exportação pelo Exportify."
         )
-        self.log_edit.setAccessibleName("Log da operação")
-        self.log_edit.setAccessibleDescription(
-            "Resumo textual de eventos, cancelamentos e falhas."
+        self.cookie_browser_combo.setAccessibleName("Sessão do YouTube")
+        self.cookie_browser_combo.setAccessibleDescription(
+            "Navegador local usado pelo yt-dlp para carregar cookies."
         )
-        self.total_progress.setAccessibleName("Progresso total")
-        self.total_progress.setAccessibleDescription(
-            "Percentual concluído da pesquisa ou do lote de downloads."
+        self.review_list.setAccessibleName("Lista de revisão das músicas")
+        self.review_list.setAccessibleDescription(
+            "Permite selecionar resultados e abrir ações para editar ou pesquisar novamente."
         )
-        self.setTabOrder(self.input_edit, self.import_csv_button)
-        self.setTabOrder(self.import_csv_button, self.spotify_edit)
-        self.setTabOrder(self.spotify_edit, self.destination_edit)
-        self.setTabOrder(self.destination_edit, self.browse_button)
-        self.setTabOrder(self.browse_button, self.cover_checkbox)
-        self.setTabOrder(self.cover_checkbox, self.search_button)
+        self.total_progress.setAccessibleName("Progresso total dos downloads")
+        self.log_edit.setAccessibleName("Detalhes técnicos do download")
+        self.setTabOrder(self.input_edit, self.destination_edit)
+        self.setTabOrder(self.destination_edit, self.add_page.browse_button)
+        self.setTabOrder(self.add_page.browse_button, self.add_page.import_button)
+        self.setTabOrder(self.add_page.import_button, self.add_page.options_button)
+        self.setTabOrder(self.add_page.options_button, self.add_page.search_button)
+
+    def _transition_to(self, stage: FlowStage) -> None:
+        changed = stage is not self._stage or self.shell.stack.currentWidget() is not self._pages[stage]
+        self._stage = stage
+        page = self._pages[stage]
+        self.shell.stack.setCurrentWidget(page)
+        if changed and self.isVisible():
+            effect = QGraphicsOpacityEffect(page)
+            page.setGraphicsEffect(effect)
+            animation = QPropertyAnimation(effect, b"opacity", self)
+            animation.setDuration(150)
+            animation.setStartValue(0.86)
+            animation.setEndValue(1.0)
+            animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+            animation.finished.connect(lambda target=page: target.setGraphicsEffect(None))
+            self._page_animation = animation
+            animation.start()
+        if stage is FlowStage.REVIEW:
+            self._refresh_review_page()
+        if stage is FlowStage.ADD:
+            self.add_page.input_edit.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _show_import_popover(self) -> None:
+        self.options_popover.hide()
+        self.import_popover.show_for(self.add_page.import_button)
+
+    def _show_options_from_add(self) -> None:
+        self.import_popover.hide()
+        self.options_popover.show_for(self.add_page.options_button)
+
+    def _show_options_from_review(self) -> None:
+        self.import_popover.hide()
+        self.options_popover.show_for(self.review_page.options_button)
+
+    def _destination_changed(self, value: str) -> None:
+        self.review_page.set_destination(value.strip())
+        self._update_download_button()
 
     def _notice(self, message: str, *, error: bool = False) -> None:
         self.last_notice = message
         prefix = "ERRO: " if error else ""
         self.log_edit.appendPlainText(f"{prefix}{message}")
         self.statusBar().showMessage(message)
+        if self._stage is FlowStage.ADD:
+            self.add_page.notice.show_message(message, error=error)
+        elif self._stage is FlowStage.SEARCHING and error:
+            self.search_page.notice.show_message(message, error=True)
+        elif self._stage is FlowStage.REVIEW:
+            self.review_page.notice.show_message(message, error=error)
+        elif self._stage is FlowStage.DOWNLOADING and error:
+            self.download_page.error_label.show_message(message, error=True)
 
     def choose_csv(self) -> None:
+        self.import_popover.hide()
         filename, _filter = QFileDialog.getOpenFileName(
             self,
             "Importar playlist CSV",
@@ -351,9 +336,6 @@ class MainWindow(QMainWindow):
             return None
 
         existing = parse_semicolon_list(self.input_edit.toPlainText()).queries
-        # Exportify may separate multiple artists with semicolons inside one
-        # CSV cell. The free-text editor uses the same character between songs,
-        # so represent those internal separators as commas before merging.
         imported_queries = tuple(
             " ".join(query.replace(";", ",").split()) for query in result.queries
         )
@@ -367,26 +349,23 @@ class MainWindow(QMainWindow):
         )
         if already_present:
             message += f", {already_present} já estavam na lista"
-        message += "."
-        self._notice(message)
+        self._notice(message + ".")
         return result
 
     def process_spotify_text(self, text: str | None = None) -> bool:
         value = self.spotify_edit.text() if text is None else text
         if not value.strip():
             self.spotify_hint_label.setText(
-                "Links são detectados; no MVP, exporte pelo Exportify e importe o CSV."
+                "Cole um link para confirmar o fluxo Exportify e depois importe o CSV."
             )
             return False
         if is_spotify_playlist_url(value):
             self.spotify_hint_label.setText(
-                "Playlist Spotify detectada. Exporte-a no Exportify e use “Importar CSV…”. "
-                "Uma lista digitada acima continua válida."
+                "Playlist detectada. Exporte-a pelo Exportify e use “Importar arquivo CSV…”."
             )
             return True
         self.spotify_hint_label.setText(
-            "O texto não é uma URL pública de playlist do Spotify. Você ainda pode "
-            "pesquisar a lista digitada acima."
+            "O texto não é uma URL pública de playlist do Spotify."
         )
         return False
 
@@ -402,7 +381,6 @@ class MainWindow(QMainWindow):
     def prepare_and_search(self) -> None:
         if self._busy:
             return
-        self.process_spotify_text()
         parsed = parse_semicolon_list(self.input_edit.toPlainText())
         self.last_parse_result = parsed
         if not parsed.queries:
@@ -411,63 +389,32 @@ class MainWindow(QMainWindow):
                 error=True,
             )
             return
-
+        self.add_page.notice.clear()
         self.input_edit.setPlainText("; ".join(parsed.queries))
-        self._notice(
-            f"Lista preparada: {len(parsed.queries)} consultas, "
-            f"{parsed.duplicate_count} duplicadas e {parsed.empty_count} vazias ignoradas."
-        )
         self._start_search(parsed.queries, target_row=None)
-
-    def research_current_row(self) -> None:
-        if self._busy:
-            return
-        row = self.review_table.currentRow()
-        if row < 0 or row >= len(self.search_results):
-            self._notice("Selecione uma linha da revisão para pesquisar novamente.", error=True)
-            return
-        item = self.review_table.item(row, 1)
-        query = item.text().strip() if item else ""
-        if not query:
-            self._notice("A consulta da linha selecionada está vazia.", error=True)
-            return
-        self._start_search((query,), target_row=row)
 
     def _start_search(self, queries: Iterable[str], target_row: int | None) -> None:
         if self._busy:
             return
         query_tuple = tuple(queries)
         generation = self._next_generation()
+        self._stage_before_operation = self._stage
         self._search_queries = query_tuple
         self._search_received = {}
         self._search_terminal = False
         self._search_max_processed = 0
+        self._search_found_count = 0
         self._research_previous_result = None
         if target_row is None:
-            self._updating_table = True
-            try:
-                self.review_table.setRowCount(0)
-                self.search_results.clear()
-            finally:
-                self._updating_table = False
-            for row, query in enumerate(query_tuple):
-                self._set_result_at_row(
-                    row, SearchResult(query=query, status=SearchStatus.NO_RESULT)
-                )
-                status_item = self.review_table.item(row, 5)
-                if status_item:
-                    status_item.setText("Aguardando pesquisa")
-        elif 0 <= target_row < len(self.search_results):
-            self._research_previous_result = self.search_results[target_row]
-            status_item = self.review_table.item(target_row, 5)
-            if status_item:
-                status_item.setText("Pesquisando novamente")
+            self.review_model.reset_waiting(query_tuple)
+        elif 0 <= target_row < self.review_model.rowCount():
+            item = self.review_model.item_at(target_row)
+            self._research_previous_result = item.result if item else None
+            self.review_model.set_status(target_row, "Pesquisando novamente")
         self._search_target_row = target_row
-        self.total_progress.setValue(0)
-        self.summary_label.setText("Pesquisando metadados sem iniciar downloads…")
-        worker = SearchWorker(
-            self.search_service, query_tuple, generation=generation
-        )
+        self.search_page.reset()
+        self._transition_to(FlowStage.SEARCHING)
+        worker = SearchWorker(self.search_service, query_tuple, generation=generation)
         worker.progress.connect(self._on_search_progress)
         self._launch_worker(
             worker,
@@ -477,9 +424,7 @@ class MainWindow(QMainWindow):
             generation=generation,
         )
 
-    def _on_search_progress(
-        self, generation: int, progress: SearchProgress
-    ) -> None:
+    def _on_search_progress(self, generation: int, progress: SearchProgress) -> None:
         if not self._accept_event(generation) or self._search_terminal:
             return
         result_index = progress.processed_items - 1
@@ -493,237 +438,240 @@ class MainWindow(QMainWindow):
                 if not 0 <= result_index < len(self._search_queries):
                     return
         self._search_received[result_index] = progress.result
-        row = (
-            result_index
-            if self._search_target_row is None
-            else self._search_target_row
-        )
-        self._set_result_at_row(row, progress.result)
+        row = result_index if self._search_target_row is None else self._search_target_row
+        self.review_model.set_result(row, progress.result)
         self._search_max_processed = max(
             self._search_max_processed,
             min(len(self._search_queries), max(0, progress.processed_items)),
         )
-        percent = int(
-            self._search_max_processed * 100 / max(1, len(self._search_queries))
-        )
-        self.total_progress.setValue(max(self.total_progress.value(), percent))
-        self.statusBar().showMessage(
-            f"Pesquisa: {self._search_max_processed}/{len(self._search_queries)} concluídas."
-        )
+        if progress.result.status is SearchStatus.FOUND:
+            self._search_found_count += 1
+            self.search_page.set_found_count(self._search_found_count)
 
-    def _on_search_completed(
-        self, generation: int, batch: SearchBatchResult
-    ) -> None:
+    def _on_search_completed(self, generation: int, batch: SearchBatchResult) -> None:
         if not self._accept_event(generation) or self._search_terminal:
             return
         self._search_terminal = True
         self.last_search_batch = batch
-        batch_by_query = {result.query: result for result in batch.results}
         displayed_results: list[SearchResult] = []
         if self._search_target_row is None:
-            for index, query in enumerate(self._search_queries):
-                result = self._search_received.get(index) or batch_by_query.get(query)
-                if result is not None:
-                    displayed_results.append(result)
-            self._updating_table = True
-            try:
-                self.review_table.setRowCount(0)
-                self.search_results.clear()
-            finally:
-                self._updating_table = False
-            for row, result in enumerate(displayed_results):
-                self._set_result_at_row(row, result)
+            result_queries = [result.query for result in batch.results]
+            input_queries = set(self._search_queries)
+            has_expansion = (
+                len(batch.results) != len(self._search_queries)
+                or len(set(result_queries)) != len(result_queries)
+                or any(query not in input_queries for query in result_queries)
+            )
+            if has_expansion:
+                displayed_results.extend(batch.results)
+            else:
+                batch_by_query = {result.query: result for result in batch.results}
+                for index, query in enumerate(self._search_queries):
+                    result = self._search_received.get(index) or batch_by_query.get(query)
+                    if result is not None:
+                        displayed_results.append(result)
+            self.review_model.reset_results(displayed_results)
         else:
             result = self._search_received.get(0)
             if result is None and batch.results:
                 result = batch.results[0]
             if result is not None:
                 displayed_results.append(result)
-                self._set_result_at_row(self._search_target_row, result)
+                self.review_model.set_result(self._search_target_row, result)
             elif self._research_previous_result is not None:
-                self._set_result_at_row(
+                self.review_model.set_result(
                     self._search_target_row, self._research_previous_result
                 )
 
-        found = sum(result.status is SearchStatus.FOUND for result in displayed_results)
-        missing = sum(
-            result.status is SearchStatus.NO_RESULT for result in displayed_results
-        )
-        errors = sum(result.status is SearchStatus.ERROR for result in displayed_results)
-        cancelled = " Operação cancelada." if batch.cancelled else ""
+        all_results = self.search_results
+        found = sum(result.status is SearchStatus.FOUND for result in all_results)
+        missing = sum(result.status is SearchStatus.NO_RESULT for result in all_results)
+        errors = sum(result.status is SearchStatus.ERROR for result in all_results)
+        cancelled = " Pesquisa cancelada." if batch.cancelled else ""
         message = (
             f"Pesquisa concluída: {found} encontrados, {missing} sem resultado, "
             f"{errors} erros.{cancelled}"
         )
-        self.summary_label.setText(message)
-        self._notice(message)
-
-    def _set_result_at_row(self, row: int, result: SearchResult) -> None:
-        self._updating_table = True
-        try:
-            if row >= self.review_table.rowCount():
-                self.review_table.insertRow(row)
-                self.search_results.append(result)
+        if self.review_model.rowCount() or self._search_target_row is not None:
+            self._transition_to(FlowStage.REVIEW)
+            if missing or errors or batch.cancelled:
+                self.review_page.notice.show_message(message, error=bool(errors))
             else:
-                self.search_results[row] = result
+                self.review_page.notice.clear()
+        else:
+            self._transition_to(FlowStage.ADD)
+            self.add_page.notice.show_message(message, error=not batch.cancelled)
+        self.last_notice = message
+        self.statusBar().showMessage(message)
 
-            select_item = QTableWidgetItem()
-            select_flags = (
-                Qt.ItemFlag.ItemIsEnabled
-                | Qt.ItemFlag.ItemIsSelectable
-                | Qt.ItemFlag.ItemIsUserCheckable
-            )
-            if result.status is not SearchStatus.FOUND:
-                select_flags &= ~Qt.ItemFlag.ItemIsUserCheckable
-            select_item.setFlags(select_flags)
-            select_item.setCheckState(
-                Qt.CheckState.Checked
-                if result.status is SearchStatus.FOUND
-                else Qt.CheckState.Unchecked
-            )
-            self.review_table.setItem(row, 0, select_item)
+    def _refresh_review_page(self) -> None:
+        found = sum(
+            result.status is SearchStatus.FOUND for result in self.search_results
+        )
+        review = len(self.search_results) - found
+        self.review_page.update_summary(found, review)
+        self.review_page.set_destination(self.destination_edit.text().strip())
+        has_rows = self.review_model.rowCount() > 0
+        self.review_page.select_found_button.setVisible(has_rows)
+        self.review_page.clear_selection_button.setVisible(has_rows)
+        self.review_page.more_button.setVisible(has_rows)
+        self._update_download_button()
 
-            query_item = QTableWidgetItem(result.query)
-            query_item.setFlags(
-                Qt.ItemFlag.ItemIsEnabled
-                | Qt.ItemFlag.ItemIsSelectable
-                | Qt.ItemFlag.ItemIsEditable
-            )
-            self.review_table.setItem(row, 1, query_item)
-            self._set_readonly_cell(row, 2, result.title or "—")
-            self._set_readonly_cell(row, 3, result.channel or "—")
-            self._set_readonly_cell(row, 4, self._format_duration(result.duration))
-            status_item = self._set_readonly_cell(
-                row, 5, _SEARCH_STATUS_TEXT[result.status]
-            )
-            if result.error:
-                status_item.setToolTip(result.error)
-                self.log_edit.appendPlainText(f"Falha em “{result.query}”: {result.error}")
-            self._set_readonly_cell(row, 6, "—")
-        finally:
-            self._updating_table = False
-        self._update_action_buttons()
+    def _on_current_review_changed(
+        self, current: QModelIndex, _previous: QModelIndex
+    ) -> None:
+        self.review_page.more_button.setEnabled(current.isValid() and not self._busy)
 
-    def _set_readonly_cell(self, row: int, column: int, text: str) -> QTableWidgetItem:
-        item = QTableWidgetItem(text)
-        item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-        self.review_table.setItem(row, column, item)
-        return item
-
-    @staticmethod
-    def _format_duration(duration: float | None) -> str:
-        if duration is None:
-            return "—"
-        seconds = max(0, int(duration))
-        minutes, seconds = divmod(seconds, 60)
-        return f"{minutes}:{seconds:02d}"
-
-    def _on_table_item_changed(self, item: QTableWidgetItem) -> None:
-        if self._updating_table:
-            return
-        row = item.row()
-        if item.column() == 1 and row < len(self.search_results):
-            query = item.text().strip()
-            current = self.search_results[row]
-            if query != current.query:
-                self._updating_table = True
-                try:
-                    self.search_results[row] = SearchResult(
-                        query=query,
-                        status=SearchStatus.NO_RESULT,
-                    )
-                    select_item = self.review_table.item(row, 0)
-                    if select_item:
-                        select_item.setCheckState(Qt.CheckState.Unchecked)
-                        select_item.setFlags(
-                            Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-                        )
-                    for column in (2, 3, 4):
-                        cell = self.review_table.item(row, column)
-                        if cell:
-                            cell.setText("—")
-                    status = self.review_table.item(row, 5)
-                    if status:
-                        status.setText("Editado — pesquise novamente")
-                    progress = self.review_table.item(row, 6)
-                    if progress:
-                        progress.setText("—")
-                finally:
-                    self._updating_table = False
-        self._update_action_buttons()
+    def _selection_changed(self, _count: int) -> None:
+        self._update_download_button()
 
     def select_all_found(self) -> None:
-        self._updating_table = True
-        try:
-            for row, result in enumerate(self.search_results):
-                item = self.review_table.item(row, 0)
-                if item and result.status is SearchStatus.FOUND:
-                    item.setCheckState(Qt.CheckState.Checked)
-        finally:
-            self._updating_table = False
-        self._update_action_buttons()
+        self.review_model.select_all_found()
 
     def clear_selection(self) -> None:
-        self._updating_table = True
-        try:
-            for row in range(self.review_table.rowCount()):
-                item = self.review_table.item(row, 0)
-                if item:
-                    item.setCheckState(Qt.CheckState.Unchecked)
-        finally:
-            self._updating_table = False
-        self._update_action_buttons()
+        self.review_model.clear_selection()
 
     def _selected_results(self) -> tuple[list[SearchResult], list[int]]:
-        selected: list[SearchResult] = []
-        rows: list[int] = []
-        for row, result in enumerate(self.search_results):
-            select_item = self.review_table.item(row, 0)
-            if (
-                result.status is SearchStatus.FOUND
-                and select_item
-                and select_item.checkState() is Qt.CheckState.Checked
-            ):
-                query_item = self.review_table.item(row, 1)
-                query = query_item.text().strip() if query_item else result.query
-                selected.append(replace(result, query=query))
-                rows.append(row)
-        return selected, rows
+        return self.review_model.selected_results()
+
+    def _on_profile_changed(self, _profile: DownloadProfile | None) -> None:
+        self._update_download_button()
+
+    def current_download_profile(self) -> DownloadProfile:
+        return self.options_popover.get_profile()
+
+    def _update_download_button(self) -> None:
+        try:
+            profile = self.current_download_profile()
+        except (TypeError, ValueError):
+            message = "Configuração de formato inválida"
+            self.review_page.download_button.setText(message)
+            self.review_page.download_button.setToolTip(
+                "Abra Opções e selecione um tipo, formato e qualidade válidos."
+            )
+            self.review_page.download_button.setAccessibleName(message)
+            self.review_page.download_button.setEnabled(False)
+            return
+        self.review_page.update_download_cta(
+            self.review_model.selected_count,
+            has_destination=bool(self.destination_edit.text().strip()) and not self._busy,
+            profile=profile,
+        )
+
+    def _open_editor(self, index: QModelIndex) -> None:
+        if self._busy or not index.isValid():
+            return
+        self.review_page.list_view.setCurrentIndex(index)
+        item = self.review_model.item_at(index.row())
+        if item is None:
+            return
+        self.review_page.query_edit.setText(item.result.query)
+        self.review_page.editor.show()
+        self.review_page.query_edit.setFocus(Qt.FocusReason.OtherFocusReason)
+        self.review_page.query_edit.selectAll()
+
+    def research_from_editor(self) -> None:
+        row = self.review_page.list_view.currentIndex().row()
+        query = self.review_page.query_edit.text().strip()
+        if row < 0:
+            self._notice("Selecione uma música para pesquisar novamente.", error=True)
+            return
+        if not query:
+            self._notice("A consulta da música está vazia.", error=True)
+            return
+        self.review_model.edit_query(row, query)
+        self.review_page.editor.hide()
+        self._start_search((query,), target_row=row)
+
+    def research_current_row(self) -> None:
+        index = self.review_page.list_view.currentIndex()
+        item = self.review_model.item_at(index.row()) if index.isValid() else None
+        if item is None:
+            self._notice("Selecione uma música para pesquisar novamente.", error=True)
+            return
+        self._start_search((item.result.query,), target_row=index.row())
+
+    def _show_delegate_menu(self, index: QModelIndex) -> None:
+        self.review_page.list_view.setCurrentIndex(index)
+        rect = self.review_page.list_view.visualRect(index)
+        position = self.review_page.list_view.viewport().mapToGlobal(rect.bottomRight())
+        self._show_row_menu(index, position)
+
+    def _show_context_menu(self, position) -> None:
+        index = self.review_page.list_view.indexAt(position)
+        if not index.isValid():
+            return
+        self.review_page.list_view.setCurrentIndex(index)
+        self._show_row_menu(
+            index, self.review_page.list_view.viewport().mapToGlobal(position)
+        )
+
+    def _show_current_row_menu(self) -> None:
+        index = self.review_page.list_view.currentIndex()
+        if not index.isValid():
+            return
+        position = self.review_page.more_button.mapToGlobal(
+            self.review_page.more_button.rect().bottomLeft()
+        )
+        self._show_row_menu(index, position)
+
+    def _show_row_menu(self, index: QModelIndex, position) -> None:
+        menu = QMenu(self)
+        edit_action = menu.addAction("Editar busca…")
+        research_action = menu.addAction("Pesquisar novamente")
+        chosen = menu.exec(position)
+        if chosen is edit_action:
+            self._open_editor(index)
+        elif chosen is research_action:
+            self.review_page.list_view.setCurrentIndex(index)
+            self.research_current_row()
 
     def start_download(self) -> None:
         if self._busy:
             return
         destination = self.destination_edit.text().strip()
         if not destination:
+            self._transition_to(FlowStage.REVIEW)
             self._notice("Escolha uma pasta de destino antes de baixar.", error=True)
             return
         selected, rows = self._selected_results()
         if not selected:
+            self._transition_to(FlowStage.REVIEW)
             self._notice("Marque pelo menos um resultado encontrado para baixar.", error=True)
             return
 
+        try:
+            profile = self.current_download_profile()
+        except (TypeError, ValueError) as error:
+            self._transition_to(FlowStage.REVIEW)
+            self._notice(
+                f"Configuração de formato inválida: {exception_diagnostic(error)}",
+                error=True,
+            )
+            return
+
         generation = self._next_generation()
+        self._stage_before_operation = self._stage
         self._download_rows = rows
+        self._download_items = selected
         self._download_terminal = False
         self._download_terminal_items = set()
         self._download_max_total_value = 0
-        self.total_progress.setValue(0)
-        self.summary_label.setText(f"Preparando {len(selected)} downloads aprovados…")
-        self._updating_table = True
-        try:
-            for row in rows:
-                progress = self.review_table.item(row, 6)
-                if progress:
-                    progress.setText("Aguardando")
-        finally:
-            self._updating_table = False
+        self._download_max_processed = 0
+        self._download_profile = profile
+        for row in rows:
+            self.review_model.set_status(row, "Pronto", "Aguardando")
+        self.download_page.reset(len(selected))
+        self._transition_to(FlowStage.DOWNLOADING)
 
         worker = DownloadWorker(
             self.download_service,
             selected,
             destination,
-            embed_thumbnail=self.cover_checkbox.isChecked(),
+            profile=profile,
+            embed_thumbnail=self.cover_checkbox.isChecked() and profile.supports_thumbnail,
             aria2c_path=self.executable_resolver("aria2c"),
+            cookie_browser=self.cookie_browser_combo.currentData(),
             generation=generation,
         )
         worker.progress.connect(self._on_download_progress)
@@ -748,15 +696,16 @@ class MainWindow(QMainWindow):
             return
         row = self._download_rows[index]
         status_text = _DOWNLOAD_STATUS_TEXT[progress.status]
-        status_item = self.review_table.item(row, 5)
-        if status_item:
-            status_item.setText(status_text)
-        progress_item = self.review_table.item(row, 6)
-        if progress_item:
-            if progress.item_fraction is None:
-                progress_item.setText(status_text)
-            else:
-                progress_item.setText(f"{int(progress.item_fraction * 100)}%")
+        progress_text = (
+            status_text
+            if progress.item_fraction is None
+            else f"{int(progress.item_fraction * 100)}%"
+        )
+        self.review_model.set_status(row, status_text.rstrip("…"), progress_text)
+        current = self._download_items[index]
+        self.download_page.current_title.setText(current.title or current.query)
+        self.download_page.status_label.setText(status_text)
+
         terminal = progress.status in {
             DownloadProgressStatus.COMPLETED,
             DownloadProgressStatus.ERROR,
@@ -765,19 +714,23 @@ class MainWindow(QMainWindow):
         completed_units = float(progress.processed_items)
         if not terminal:
             completed_units += progress.item_fraction or 0.0
-        total_fraction = completed_units / max(1, progress.total_items)
-        candidate_value = min(100, int(total_fraction * 100))
+        candidate_value = min(
+            100, int(completed_units / max(1, progress.total_items) * 100)
+        )
         self._download_max_total_value = max(
             self._download_max_total_value,
-            self.total_progress.value(),
+            self.download_page.progress_bar.value(),
             candidate_value,
         )
-        self.total_progress.setValue(self._download_max_total_value)
+        self.download_page.progress_bar.setValue(self._download_max_total_value)
+        self._download_max_processed = max(
+            self._download_max_processed, progress.processed_items
+        )
+        self.download_page.count_label.setText(
+            f"{self._download_max_processed} de {progress.total_items} concluídos"
+        )
         if terminal:
             self._download_terminal_items.add(progress.item_index)
-        self.statusBar().showMessage(
-            f"Downloads: item {progress.item_index}/{progress.total_items} — {status_text}."
-        )
 
     def _on_download_completed(
         self, generation: int, batch: DownloadBatchResult
@@ -787,11 +740,11 @@ class MainWindow(QMainWindow):
         self._download_terminal = True
         self.last_download_batch = batch
         if batch.preflight_error:
-            message = f"Download não iniciado: {batch.preflight_error}"
-            self.summary_label.setText(message)
-            self._notice(message, error=True)
+            self._transition_to(FlowStage.REVIEW)
+            self._notice(f"Download não iniciado: {batch.preflight_error}", error=True)
             return
 
+        failure_details: list[str] = []
         for index, outcome in enumerate(batch.results):
             if index >= len(self._download_rows):
                 break
@@ -801,44 +754,68 @@ class MainWindow(QMainWindow):
                 DownloadStatus.ERROR: "Falha",
                 DownloadStatus.CANCELLED: "Cancelado",
             }[outcome.status]
-            status_item = self.review_table.item(row, 5)
-            progress_item = self.review_table.item(row, 6)
-            if status_item:
-                status_item.setText(status)
-                if outcome.error:
-                    status_item.setToolTip(outcome.error)
-            if progress_item:
-                progress_item.setText("100%" if outcome.status is DownloadStatus.COMPLETED else status)
-            select_item = self.review_table.item(row, 0)
-            if select_item:
-                select_item.setCheckState(Qt.CheckState.Unchecked)
+            self.review_model.set_status(
+                row,
+                status,
+                "100%" if outcome.status is DownloadStatus.COMPLETED else status,
+            )
+            model_index = self.review_model.index(row)
+            self.review_model.setData(
+                model_index, Qt.CheckState.Unchecked, Qt.ItemDataRole.CheckStateRole
+            )
             if outcome.status is DownloadStatus.ERROR:
-                self.log_edit.appendPlainText(
-                    f"Falha em “{outcome.query}”: {outcome.error or 'sem diagnóstico'}"
-                )
+                detail = f"{outcome.query}: {outcome.error or 'sem diagnóstico'}"
+                failure_details.append(detail)
+                self.log_edit.appendPlainText(f"Falha em “{detail}”")
 
         unprocessed = max(0, len(self._download_rows) - len(batch.results))
         cancelled_count = sum(
             result.status is DownloadStatus.CANCELLED for result in batch.results
         ) + (unprocessed if batch.cancelled else 0)
+
+        media_kind = self._download_profile.media_kind
         if batch.cancelled:
             for row in self._download_rows[len(batch.results) :]:
-                status_item = self.review_table.item(row, 5)
-                progress_item = self.review_table.item(row, 6)
-                if status_item:
-                    status_item.setText("Cancelado")
-                if progress_item:
-                    progress_item.setText("Cancelado")
+                self.review_model.set_status(row, "Cancelado", "Cancelado")
+            if unprocessed:
+                noun = "áudio" if media_kind is MediaKind.AUDIO else "vídeo"
+                if unprocessed != 1:
+                    noun += "s"
+                verb = "foi processado" if unprocessed == 1 else "foram processados"
+                failure_details.append(
+                    f"{unprocessed} {noun} não {verb} devido ao cancelamento."
+                )
 
         destination = self.destination_edit.text().strip()
+        self._download_max_total_value = 100
+        self.download_page.progress_bar.setValue(100)
+        self.completion_page.show_result(
+            successful=batch.successful_count,
+            failed=batch.failed_count,
+            cancelled=cancelled_count,
+            destination=destination,
+            failure_details=failure_details,
+            media_kind=media_kind,
+        )
         message = (
             f"Resumo: {batch.successful_count} sucesso(s), {batch.failed_count} falha(s), "
             f"{cancelled_count} cancelado(s). Pasta: {destination}"
         )
-        self._download_max_total_value = 100
-        self.total_progress.setValue(100)
-        self.summary_label.setText(message)
-        self._notice(message)
+        self.last_notice = message
+        self.statusBar().showMessage(message)
+        self._transition_to(FlowStage.COMPLETE)
+
+    def open_destination_folder(self) -> bool:
+        destination = self.destination_edit.text().strip()
+        if not destination or not Path(destination).exists():
+            self._notice("A pasta de destino não está disponível.", error=True)
+            return False
+        return QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(destination))))
+
+    def start_new_operation(self) -> None:
+        # Preserve current fields exactly as the legacy single-window UI did.
+        self.completion_page.failures_edit.hide()
+        self._transition_to(FlowStage.ADD)
 
     def _next_generation(self) -> int:
         self._generation_counter += 1
@@ -895,10 +872,16 @@ class MainWindow(QMainWindow):
         if operation_name == "search":
             self._search_terminal = True
             message = f"Pesquisa interrompida por erro inesperado: {diagnostic}"
+            target = (
+                FlowStage.REVIEW
+                if self._search_target_row is not None or self.review_model.rowCount()
+                else FlowStage.ADD
+            )
         else:
             self._download_terminal = True
             message = f"Download interrompido por erro inesperado: {diagnostic}"
-        self.summary_label.setText(message)
+            target = FlowStage.REVIEW
+        self._transition_to(target)
         self._notice(message, error=True)
 
     def _on_thread_finished(self) -> None:
@@ -914,38 +897,44 @@ class MainWindow(QMainWindow):
         if self._active_worker is None:
             return
         self._active_worker.cancel()
-        self.cancel_button.setEnabled(False)
-        self.statusBar().showMessage("Cancelamento solicitado; aguardando ponto seguro…")
+        self.search_page.cancel_button.setEnabled(False)
+        self.download_page.cancel_button.setEnabled(False)
         self.log_edit.appendPlainText("Cancelamento solicitado pelo usuário.")
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
-        self.input_edit.setEnabled(not busy)
-        self.spotify_edit.setEnabled(not busy)
-        self.destination_edit.setEnabled(not busy)
-        self.cover_checkbox.setEnabled(not busy)
-        self.import_csv_button.setEnabled(not busy)
-        self.browse_button.setEnabled(not busy)
-        self.search_button.setEnabled(not busy)
-        self.research_button.setEnabled(not busy and self.review_table.currentRow() >= 0)
-        self.select_found_button.setEnabled(not busy and bool(self.search_results))
-        self.clear_selection_button.setEnabled(not busy and bool(self.search_results))
-        self.cancel_button.setEnabled(busy)
-        self.review_table.setEnabled(not busy)
-        self._update_download_button()
-
-    def _update_action_buttons(self) -> None:
-        self.research_button.setEnabled(
-            not self._busy and self.review_table.currentRow() >= 0
+        self.options_popover.set_busy(busy)
+        for widget in (
+            self.input_edit,
+            self.destination_edit,
+            self.add_page.browse_button,
+            self.add_page.import_button,
+            self.add_page.options_button,
+            self.add_page.search_button,
+            self.review_page.back_button,
+            self.review_page.options_button,
+            self.review_page.change_destination_button,
+            self.review_page.select_found_button,
+            self.review_page.clear_selection_button,
+            self.review_page.more_button,
+            self.review_page.list_view,
+            self.review_page.query_edit,
+            self.review_page.research_button,
+            self.review_page.editor_cancel_button,
+            self.completion_page.open_folder_button,
+            self.completion_page.new_operation_button,
+        ):
+            widget.setEnabled(not busy)
+        self.search_page.cancel_button.setEnabled(busy and self._operation == "search")
+        self.download_page.cancel_button.setEnabled(
+            busy and self._operation == "download"
         )
-        has_rows = bool(self.search_results)
-        self.select_found_button.setEnabled(not self._busy and has_rows)
-        self.clear_selection_button.setEnabled(not self._busy and has_rows)
+        self.import_popover.setEnabled(not busy)
         self._update_download_button()
 
-    def _update_download_button(self) -> None:
-        selected, _rows = self._selected_results()
-        self.download_button.setEnabled(not self._busy and bool(selected))
+    @staticmethod
+    def _format_duration(duration: float | None) -> str:
+        return format_duration(duration)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._active_thread is not None and self._active_thread.isRunning():

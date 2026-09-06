@@ -9,6 +9,7 @@ import pytest
 import yt_dlp
 
 from music_downloader.cancellation import CancellationToken
+from music_downloader.download_profiles import AudioFormat, DownloadProfile, VideoFormat
 from music_downloader.download_service import DownloadService, build_output_basename
 from music_downloader.models import (
     DownloadProgress,
@@ -128,6 +129,154 @@ def test_thumbnail_options_are_optional(
     assert options["postprocessors"][0]["preferredquality"] == "192"
 
 
+@pytest.mark.parametrize(
+    ("audio_format", "bitrate", "extension"),
+    [
+        (AudioFormat.MP3, 320, "mp3"),
+        (AudioFormat.M4A, 256, "m4a"),
+        (AudioFormat.OPUS, 128, "opus"),
+        (AudioFormat.AAC, 192, "m4a"),
+        (AudioFormat.VORBIS, 192, "ogg"),
+        (AudioFormat.ALAC, None, "m4a"),
+        (AudioFormat.FLAC, None, "flac"),
+        (AudioFormat.WAV, None, "wav"),
+    ],
+)
+def test_audio_profiles_build_safe_extract_options_and_final_paths(
+    tmp_path: Path,
+    audio_format: AudioFormat,
+    bitrate: int | None,
+    extension: str,
+) -> None:
+    factory = FakeFactory([{}])
+    profile = DownloadProfile.for_audio(audio_format, bitrate_kbps=bitrate)
+
+    batch = service(factory).download_batch([approved()], tmp_path, profile=profile)
+
+    options = factory.options[0]
+    extract = options["postprocessors"][0]
+    assert options["format"] == "bestaudio/best"
+    assert options["final_ext"] == extension
+    assert extract["key"] == "FFmpegExtractAudio"
+    assert extract["preferredcodec"] == audio_format.value
+    if bitrate is None:
+        assert "preferredquality" not in extract
+    else:
+        assert extract["preferredquality"] == str(bitrate)
+    assert batch.results[0].output_path == (
+        tmp_path / f"Song title [video-id].{extension}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("video_format", "height", "selector", "extension", "merge_format"),
+    [
+        (
+            VideoFormat.MP4_COMPATIBLE,
+            1080,
+            "bestvideo[height<=?1080]+bestaudio",
+            "mp4",
+            "mkv",
+        ),
+        (
+            VideoFormat.MP4_FAST,
+            720,
+            "bestvideo[ext=mp4][height<=?720]+bestaudio[ext=m4a]"
+            "/best[ext=mp4][height<=?720]",
+            "mp4",
+            "mp4",
+        ),
+        (
+            VideoFormat.WEBM,
+            None,
+            "bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]",
+            "webm",
+            "webm",
+        ),
+    ],
+)
+def test_fixed_video_profiles_build_expected_selectors_and_paths(
+    tmp_path: Path,
+    video_format: VideoFormat,
+    height: int | None,
+    selector: str,
+    extension: str,
+    merge_format: str,
+) -> None:
+    factory = FakeFactory([{}])
+    profile = DownloadProfile.for_video(video_format, max_height=height)
+
+    batch = service(factory).download_batch([approved()], tmp_path, profile=profile)
+
+    options = factory.options[0]
+    assert options["format"] == selector
+    assert options["final_ext"] == extension
+    assert options["merge_output_format"] == merge_format
+    assert batch.results[0].output_path == (
+        tmp_path / f"Song title [video-id].{extension}"
+    )
+
+
+def test_compatible_mp4_forces_h264_aac_conversion(tmp_path: Path) -> None:
+    factory = FakeFactory([{}])
+    profile = DownloadProfile.for_video(VideoFormat.MP4_COMPATIBLE)
+
+    service(factory).download_batch([approved()], tmp_path, profile=profile)
+
+    options = factory.options[0]
+    assert options["postprocessors"][0] == {
+        "key": "FFmpegVideoConvertor",
+        "preferedformat": "mp4",
+    }
+    assert options["postprocessor_args"]["videoconvertor+ffmpeg_o"] == [
+        "-c:v",
+        "libx264",
+        "-c:a",
+        "aac",
+        "-pix_fmt",
+        "yuv420p",
+    ]
+
+
+def test_original_video_uses_dynamic_filepath_reported_by_ytdlp(
+    tmp_path: Path,
+) -> None:
+    actual_path = tmp_path / "Song title [video-id].mkv"
+    factory = FakeFactory([{"filepath": str(actual_path)}])
+    profile = DownloadProfile.for_video(VideoFormat.ORIGINAL)
+
+    batch = service(factory).download_batch([approved()], tmp_path, profile=profile)
+
+    options = factory.options[0]
+    assert options["format"] == "bestvideo*+bestaudio/best"
+    assert "final_ext" not in options
+    assert "merge_output_format" not in options
+    assert batch.results[0].output_path == actual_path
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        DownloadProfile.for_audio(AudioFormat.WAV),
+        DownloadProfile.for_video(VideoFormat.ORIGINAL),
+    ],
+)
+def test_thumbnail_is_rejected_before_side_effects_for_unsupported_profiles(
+    tmp_path: Path, profile: DownloadProfile
+) -> None:
+    destination = tmp_path / "must-not-exist"
+    factory = FakeFactory([{}])
+
+    batch = service(factory).download_batch(
+        [approved()], destination, profile=profile, embed_thumbnail=True
+    )
+
+    assert batch.preflight_error is not None
+    assert "não permite incorporar thumbnail" in batch.preflight_error
+    assert factory.calls == []
+    assert not destination.exists()
+
+
 @pytest.mark.parametrize("aria2c_path", [None, r"C:\tools\aria2c.exe"])
 def test_aria2c_options_are_optional(tmp_path: Path, aria2c_path: str | None) -> None:
     factory = FakeFactory([{}])
@@ -141,6 +290,104 @@ def test_aria2c_options_are_optional(tmp_path: Path, aria2c_path: str | None) ->
     else:
         assert "external_downloader" not in options
         assert "external_downloader_args" not in options
+
+
+@pytest.mark.parametrize("cookie_browser", [None, "firefox", "chrome", "edge"])
+def test_browser_cookie_options_are_structured_and_optional(
+    tmp_path: Path, cookie_browser: str | None
+) -> None:
+    factory = FakeFactory([{}])
+
+    service(factory).download_batch(
+        [approved()], tmp_path, cookie_browser=cookie_browser
+    )
+
+    options = factory.options[0]
+    if cookie_browser:
+        assert options["cookiesfrombrowser"] == (cookie_browser,)
+    else:
+        assert "cookiesfrombrowser" not in options
+
+
+def test_invalid_cookie_browser_is_a_preflight_error(tmp_path: Path) -> None:
+    destination = tmp_path / "must-not-exist"
+    factory = FakeFactory([{}])
+
+    batch = service(factory).download_batch(
+        [approved()], destination, cookie_browser="browser;not-a-command"
+    )
+
+    assert batch.preflight_error == (
+        "Navegador inválido para carregar a sessão do YouTube."
+    )
+    assert factory.calls == []
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("cookie_browser", [None, "firefox"])
+def test_youtube_antibot_error_does_not_retry_and_has_actionable_guidance(
+    tmp_path: Path, cookie_browser: str | None
+) -> None:
+    factory = FakeFactory(
+        [
+            yt_dlp.utils.DownloadError(
+                "ERROR: [youtube] id: Sign in to confirm you're not a bot."
+            )
+        ]
+    )
+    waits: list[float] = []
+
+    batch = service(
+        factory, waiter=lambda delay, _token: waits.append(delay)
+    ).download_batch([approved()], tmp_path, cookie_browser=cookie_browser)
+
+    result = batch.results[0]
+    assert result.status is DownloadStatus.ERROR
+    assert result.attempts == 1
+    assert waits == []
+    assert len(factory.calls) == 1
+    assert result.error is not None
+    if cookie_browser:
+        assert "sessão do navegador selecionado" in result.error
+    else:
+        assert "Sessão YouTube" in result.error
+
+
+def test_missing_youtube_format_does_not_retry_and_explains_ejs(
+    tmp_path: Path,
+) -> None:
+    factory = FakeFactory(
+        [yt_dlp.utils.DownloadError("Requested format is not available")]
+    )
+    waits: list[float] = []
+
+    batch = service(
+        factory, waiter=lambda delay, _token: waits.append(delay)
+    ).download_batch([approved()], tmp_path, cookie_browser="firefox")
+
+    result = batch.results[0]
+    assert result.status is DownloadStatus.ERROR
+    assert result.attempts == 1
+    assert waits == []
+    assert len(factory.calls) == 1
+    assert result.error is not None
+    assert "componentes JavaScript EJS" in result.error
+    assert "PO Token" in result.error
+
+
+def test_unavailable_video_does_not_retry(tmp_path: Path) -> None:
+    factory = FakeFactory(
+        [yt_dlp.utils.DownloadError("Video unavailable: removed by uploader")]
+    )
+    waits: list[float] = []
+
+    batch = service(
+        factory, waiter=lambda delay, _token: waits.append(delay)
+    ).download_batch([approved()], tmp_path, cookie_browser="firefox")
+
+    assert batch.results[0].attempts == 1
+    assert waits == []
+    assert len(factory.calls) == 1
 
 
 def test_transient_errors_retry_three_times_with_injected_waiter(tmp_path: Path) -> None:

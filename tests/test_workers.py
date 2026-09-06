@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from music_downloader.download_profiles import DownloadProfile, VideoFormat
 from music_downloader.models import (
     DownloadBatchResult,
     DownloadProgress,
@@ -39,16 +40,22 @@ class EmittingSearchService:
 
 
 class EmittingDownloadService:
+    def __init__(self) -> None:
+        self.received_profile = None
+
     def download_batch(
         self,
         approved_results,
         output_directory,
         *,
+        profile,
         embed_thumbnail,
         aria2c_path,
+        cookie_browser,
         cancellation,
         progress_callback,
     ):
+        self.received_profile = profile
         items = tuple(approved_results)
         results = []
         for index, item in enumerate(items, start=1):
@@ -102,12 +109,16 @@ def test_search_worker_cancel_signal_is_cooperative(qtbot) -> None:
 
 
 def test_download_worker_emits_progress_and_completion(qtbot, tmp_path: Path) -> None:
+    service = EmittingDownloadService()
+    profile = DownloadProfile.for_video(VideoFormat.WEBM, max_height=720)
     worker = DownloadWorker(
-        EmittingDownloadService(),
+        service,
         [found()],
         tmp_path,
+        profile=profile,
         embed_thumbnail=True,
         aria2c_path="aria2c",
+        cookie_browser="firefox",
     )
 
     with qtbot.waitSignal(worker.completed, timeout=1000) as completed:
@@ -115,6 +126,7 @@ def test_download_worker_emits_progress_and_completion(qtbot, tmp_path: Path) ->
             worker.run()
 
     assert completed.args[1].successful_count == 1
+    assert service.received_profile == profile
 
 
 def test_download_worker_cancel_is_cooperative(qtbot, tmp_path: Path) -> None:

@@ -2,16 +2,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 import hashlib
 from pathlib import Path
 from typing import Any
 
 import yt_dlp
 
+from music_downloader.browser_cookies import SUPPORTED_COOKIE_BROWSERS
 from music_downloader.cancellation import CancellationToken, OperationCancelled
 from music_downloader.dependencies import detect_media_tools
 from music_downloader.diagnostics import exception_diagnostic
+from music_downloader.download_profiles import (
+    DEFAULT_DOWNLOAD_PROFILE,
+    AudioFormat,
+    DownloadProfile,
+    MediaKind,
+    VideoFormat,
+)
 from music_downloader.models import (
     DownloadBatchResult,
     DownloadProgress,
@@ -95,25 +103,54 @@ def _reserve_output_basename(
 def download_options(
     output_template: Path,
     *,
+    profile: DownloadProfile = DEFAULT_DOWNLOAD_PROFILE,
     embed_thumbnail: bool,
     aria2c_path: str | None,
+    cookie_browser: str | None,
     progress_hook: Callable[[dict[str, Any]], None],
 ) -> dict[str, Any]:
-    """Return adapted, structured yt-dlp options from the validated script."""
+    """Return structured yt-dlp options for one validated output profile."""
 
-    postprocessors: list[dict[str, Any]] = [
-        {
+    postprocessors: list[dict[str, Any]] = []
+    if profile.media_kind is MediaKind.AUDIO:
+        assert profile.audio_format is not None
+        extract_audio: dict[str, Any] = {
             "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "192",
-        },
-        {"key": "FFmpegMetadata", "add_metadata": True},
-    ]
+            "preferredcodec": profile.audio_format.value,
+        }
+        if profile.audio_bitrate_kbps is not None:
+            extract_audio["preferredquality"] = str(profile.audio_bitrate_kbps)
+        postprocessors.append(extract_audio)
+        format_selector = "bestaudio/best"
+    else:
+        assert profile.video_format is not None
+        height_filter = (
+            "" if profile.max_video_height is None else f"[height<=?{profile.max_video_height}]"
+        )
+        if profile.video_format is VideoFormat.MP4_COMPATIBLE:
+            format_selector = f"bestvideo{height_filter}+bestaudio"
+            postprocessors.append(
+                {"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}
+            )
+        elif profile.video_format is VideoFormat.MP4_FAST:
+            format_selector = (
+                f"bestvideo[ext=mp4]{height_filter}+bestaudio[ext=m4a]"
+                f"/best[ext=mp4]{height_filter}"
+            )
+        elif profile.video_format is VideoFormat.WEBM:
+            format_selector = (
+                f"bestvideo[ext=webm]{height_filter}+bestaudio[ext=webm]"
+                f"/best[ext=webm]{height_filter}"
+            )
+        else:
+            format_selector = f"bestvideo*{height_filter}+bestaudio/best{height_filter}"
+
+    postprocessors.append({"key": "FFmpegMetadata", "add_metadata": True})
     if embed_thumbnail:
         postprocessors.append({"key": "EmbedThumbnail"})
 
     options: dict[str, Any] = {
-        "format": "bestaudio/best",
+        "format": format_selector,
         "outtmpl": str(output_template),
         "noplaylist": True,
         "js_runtimes": {"node": {}},
@@ -126,10 +163,78 @@ def download_options(
         "postprocessors": postprocessors,
         "progress_hooks": [progress_hook],
     }
+    if profile.output_extension:
+        options["final_ext"] = profile.output_extension
+    if profile.video_format is VideoFormat.MP4_COMPATIBLE:
+        # Force an intermediate container so the converter always runs. Its
+        # output arguments replace stream-copy with broadly compatible codecs.
+        options["merge_output_format"] = "mkv"
+        options["postprocessor_args"] = {
+            "videoconvertor+ffmpeg_o": [
+                "-c:v",
+                "libx264",
+                "-c:a",
+                "aac",
+                "-pix_fmt",
+                "yuv420p",
+            ]
+        }
+    elif profile.video_format is VideoFormat.MP4_FAST:
+        options["merge_output_format"] = "mp4"
+    elif profile.video_format is VideoFormat.WEBM:
+        options["merge_output_format"] = "webm"
     if aria2c_path:
         options["external_downloader"] = aria2c_path
         options["external_downloader_args"] = {"aria2c": ["-k", "1M"]}
+    if cookie_browser:
+        options["cookiesfrombrowser"] = (cookie_browser,)
     return options
+
+
+def _is_youtube_auth_error(error: Exception) -> bool:
+    diagnostic = str(error).casefold()
+    return (
+        "sign in to confirm you're not a bot" in diagnostic
+        or "sign in to confirm you’re not a bot" in diagnostic
+    )
+
+
+def _is_requested_format_error(error: Exception) -> bool:
+    return "requested format is not available" in str(error).casefold()
+
+
+def _is_non_retryable_download_error(error: Exception) -> bool:
+    diagnostic = str(error).casefold()
+    return (
+        _is_youtube_auth_error(error)
+        or _is_requested_format_error(error)
+        or "video unavailable" in diagnostic
+    )
+
+
+def _download_error_diagnostic(
+    error: Exception, *, cookie_browser: str | None
+) -> str:
+    if _is_youtube_auth_error(error):
+        if cookie_browser:
+            return (
+                "O YouTube recusou a sessão do navegador selecionado. Confirme que "
+                "você está conectado ao YouTube nesse navegador; se necessário, "
+                "feche o navegador ou selecione outro e tente novamente."
+            )
+        return (
+            "O YouTube pediu autenticação anti-bot. Selecione em ‘Sessão YouTube’ "
+            "um navegador no qual você esteja conectado ao YouTube e tente "
+            "novamente."
+        )
+    if _is_requested_format_error(error):
+        return (
+            "O YouTube não forneceu um formato de mídia compatível com o perfil. "
+            "Tente outra qualidade ou formato. Atualize o "
+            "aplicativo para uma versão com os componentes JavaScript EJS; se o "
+            "problema continuar em um vídeo específico, ele pode exigir PO Token."
+        )
+    return exception_diagnostic(error)
 
 
 class DownloadService:
@@ -153,8 +258,10 @@ class DownloadService:
         approved_results: Iterable[SearchResult],
         output_directory: str | Path,
         *,
+        profile: DownloadProfile = DEFAULT_DOWNLOAD_PROFILE,
         embed_thumbnail: bool = False,
         aria2c_path: str | None = None,
+        cookie_browser: str | None = None,
         cancellation: CancellationToken | None = None,
         progress_callback: DownloadProgressCallback | None = None,
     ) -> DownloadBatchResult:
@@ -166,6 +273,24 @@ class DownloadService:
             return DownloadBatchResult(results=(), cancelled=token.cancelled)
         if token.cancelled:
             return DownloadBatchResult(results=(), cancelled=True)
+        if embed_thumbnail and not profile.supports_thumbnail:
+            return DownloadBatchResult(
+                results=(),
+                cancelled=False,
+                preflight_error=(
+                    "O perfil selecionado não permite incorporar thumbnail. "
+                    "Desative a capa ou escolha outro formato."
+                ),
+            )
+        if (
+            cookie_browser not in SUPPORTED_COOKIE_BROWSERS
+            and cookie_browser is not None
+        ):
+            return DownloadBatchResult(
+                results=(),
+                cancelled=False,
+                preflight_error="Navegador inválido para carregar a sessão do YouTube.",
+            )
 
         try:
             tools = self._tool_detector()
@@ -210,8 +335,10 @@ class DownloadService:
                 total_items=len(items),
                 processed_items=len(outcomes),
                 destination=destination,
+                profile=profile,
                 embed_thumbnail=embed_thumbnail,
                 aria2c_path=aria2c_path,
+                cookie_browser=cookie_browser,
                 token=token,
                 progress_callback=progress_callback,
                 basename=basename,
@@ -233,8 +360,10 @@ class DownloadService:
         total_items: int,
         processed_items: int,
         destination: Path,
+        profile: DownloadProfile,
         embed_thumbnail: bool,
         aria2c_path: str | None,
+        cookie_browser: str | None,
         token: CancellationToken,
         progress_callback: DownloadProgressCallback | None,
         basename: str | None,
@@ -260,7 +389,11 @@ class DownloadService:
 
         if basename is None:
             raise AssertionError("valid download item requires a reserved basename")
-        output_path = destination / f"{basename}.mp3"
+        output_path = (
+            destination / f"{basename}.{profile.output_extension}"
+            if profile.output_extension
+            else None
+        )
         output_template = destination / f"{basename}.%(ext)s"
         attempt_limit = min(3, len(self._retry_delays) + 1)
 
@@ -294,8 +427,10 @@ class DownloadService:
 
         options = download_options(
             output_template,
+            profile=profile,
             embed_thumbnail=embed_thumbnail,
             aria2c_path=aria2c_path,
+            cookie_browser=cookie_browser,
             progress_hook=hook,
         )
 
@@ -303,8 +438,9 @@ class DownloadService:
             try:
                 token.raise_if_cancelled()
                 with self._ytdl_factory(options) as ydl:
-                    ydl.extract_info(item.url, download=True)
+                    info = ydl.extract_info(item.url, download=True)
                 token.raise_if_cancelled()
+                actual_output_path = self._result_output_path(info, output_path)
                 self._emit_progress(
                     item,
                     item_index,
@@ -318,7 +454,7 @@ class DownloadService:
                     query=item.query,
                     id=item.id,
                     status=DownloadStatus.COMPLETED,
-                    output_path=output_path,
+                    output_path=actual_output_path,
                     attempts=attempt,
                 )
             except OperationCancelled as error:
@@ -356,6 +492,17 @@ class DownloadService:
                         attempts=attempt,
                         error="Operação cancelada pelo usuário.",
                     )
+                if _is_non_retryable_download_error(error):
+                    return self._error_result(
+                        item,
+                        attempt,
+                        error,
+                        item_index,
+                        total_items,
+                        processed_items,
+                        progress_callback,
+                        cookie_browser=cookie_browser,
+                    )
                 if attempt == attempt_limit:
                     return self._error_result(
                         item,
@@ -365,6 +512,7 @@ class DownloadService:
                         total_items,
                         processed_items,
                         progress_callback,
+                        cookie_browser=cookie_browser,
                     )
                 self._emit_progress(
                     item,
@@ -403,9 +551,20 @@ class DownloadService:
                     total_items,
                     processed_items,
                     progress_callback,
+                    cookie_browser=cookie_browser,
                 )
 
         raise AssertionError("unreachable")
+
+    @staticmethod
+    def _result_output_path(
+        info: object, fallback: Path | None
+    ) -> Path | None:
+        if isinstance(info, Mapping):
+            filepath = info.get("filepath")
+            if isinstance(filepath, str) and filepath:
+                return Path(filepath)
+        return fallback
 
     @staticmethod
     def _optional_int(value: object) -> int | None:
@@ -450,6 +609,8 @@ class DownloadService:
         total_items: int,
         processed_items: int,
         callback: DownloadProgressCallback | None,
+        *,
+        cookie_browser: str | None,
     ) -> DownloadResult:
         self._emit_progress(
             item,
@@ -465,5 +626,5 @@ class DownloadService:
             status=DownloadStatus.ERROR,
             output_path=None,
             attempts=attempt,
-            error=exception_diagnostic(error),
+            error=_download_error_diagnostic(error, cookie_browser=cookie_browser),
         )

@@ -1,21 +1,41 @@
 # Music Downloader
 
-Aplicativo desktop Windows para pesquisar, revisar e baixar em MP3 músicas que
-o usuário possua ou tenha autorização para baixar. O backend usa yt-dlp e
-FFmpeg; a interface é feita com PySide6.
+Aplicativo desktop Windows para pesquisar, revisar e baixar músicas e vídeos
+em formatos selecionáveis, desde que o usuário possua o conteúdo ou tenha
+autorização para baixá-lo. O backend usa yt-dlp e FFmpeg; a interface é feita
+com PySide6.
 
 > Estado atual: versão Windows `onedir` gerada, validada e aprovada pelo QA
 > final. A suíte usa serviços fake; uma validação manual separada exercita
 > yt-dlp e FFmpeg reais sem conservar a mídia temporária.
 
+## Baixar para Windows
+
+Baixe o instalador mais recente em
+[`MusicDownloader-Setup`](https://github.com/pedroSalles08/MusicDownloader/releases/latest).
+O instalador é destinado ao Windows 10/11 de 64 bits, não exige privilégios de
+administrador e registra **Music Downloader** no Menu Iniciar. Depois da
+instalação, basta pesquisar por `Music Downloader` na barra de pesquisa do
+Windows para abrir o aplicativo.
+
+O arquivo `MusicDownloader-<versão>-portable.zip` da mesma página funciona sem
+instalação, mas não cria o atalho pesquisável. Os hashes SHA-256 dos dois
+pacotes estão em `SHA256SUMS.txt`. Como os binários ainda não têm assinatura de
+código, o Windows SmartScreen pode exibir um aviso na primeira execução.
+
 ## Funcionalidades entregues
 
-- lista de músicas separada por `;`;
+- lista mista de músicas, vídeos e playlists do YouTube separada por `;`;
 - importação de CSV do Spotify/Exportify;
-- pesquisa e revisão de resultados do YouTube;
+- pesquisa por nome, resolução exata de vídeos do YouTube e expansão de playlists;
 - edição, nova pesquisa e seleção por item;
-- download MP3 com progresso, cancelamento e resumo;
-- interface retrô organizada;
+- download em múltiplos formatos de áudio (MP3, M4A, Opus, AAC, Vorbis, FLAC, ALAC, WAV) e vídeo (MP4 compatível, MP4 rápido, WebM, Original) com limites de bitrate/resolução;
+- progresso, cancelamento e resumo de downloads com métricas e detalhes técnicos recolhidos;
+- autenticação anti-bot opcional com a sessão local do Firefox, Chrome, Edge,
+  Brave, Vivaldi ou Opera;
+- componentes EJS empacotados para resolver os desafios JavaScript atuais do
+  YouTube e recuperar formatos de áudio;
+- interface dark progressiva com comportamento nativo do Windows;
 - executável para Windows.
 
 Links públicos do Spotify serão reconhecidos, mas a importação direta não faz parte do MVP; o aplicativo orientará o uso de Exportify e CSV.
@@ -38,6 +58,14 @@ Para abrir o aplicativo ou executar apenas o smoke-test sem rede:
 .\.venv\Scripts\python.exe -m music_downloader --smoke-test
 ```
 
+Se o YouTube pedir para confirmar que você não é um robô, escolha em
+`Sessão YouTube` o navegador no qual você já está conectado ao YouTube e
+inicie o download novamente. O navegador padrão do Windows é pré-selecionado
+quando é compatível. O yt-dlp lê os cookies localmente; o aplicativo não os
+exibe nem os transforma em argumentos de shell. Se a sessão não puder ser
+lida, feche o navegador ou escolha outro perfil/navegador em que haja login.
+Use uma conta somente quando necessário e respeite os limites do YouTube.
+
 ## Build do aplicativo Windows
 
 O build reproduzível usa o arquivo `MusicDownloader.spec`. Este comando cria o
@@ -53,9 +81,18 @@ Se o ambiente já estiver sincronizado, use `-SkipInstall`. O executável fica e
 `dist\MusicDownloader` inteira, não apenas o `.exe`.
 
 FFmpeg, FFprobe, Node e aria2c não são incorporados ao pacote. FFmpeg e FFprobe
-são obrigatórios no `PATH`; Node melhora a compatibilidade atual do YouTube e
-aria2c é opcional. A distribuição ainda não possui instalador nem assinatura
-de código.
+são obrigatórios no `PATH`; Node executa os desafios JavaScript do YouTube com
+os scripts `yt-dlp-ejs` incluídos na distribuição, e aria2c é opcional. A
+distribuição possui instalador por usuário, atalho pesquisável no Menu Iniciar
+e pacote portátil. Os binários ainda não possuem assinatura de código.
+
+Para gerar ambos localmente, instale o Inno Setup 6 e execute:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build_release.ps1
+```
+
+O resultado fica em `release\`: instalador, pacote portátil e hashes SHA-256.
 
 Para repetir a validação real controlada:
 
@@ -78,12 +115,22 @@ O pacote `music_downloader` já oferece:
 - saneamento de componentes de nome de arquivo para Windows, limitado por
   unidades UTF-16 sem cortar caracteres suplementares;
 - detecção injetável de FFmpeg e FFprobe;
-- pesquisa de um resultado por query, sem download, com falhas isoladas;
+- pesquisa de um resultado por nome, resolução de links exatos e expansão de
+  playlists do YouTube, sem download durante a revisão e com falhas isoladas;
 - download por URL já aprovada, MP3 192 kbps, metadados, capa opcional,
-  retries, progresso e cancelamento cooperativo;
-- interface PySide6 em pt-BR com importação, fallback Spotify, revisão
-  editável, seleção, progresso, logs, cancelamento e resumo;
+  cookies opcionais do navegador, retries, progresso e cancelamento
+  cooperativo;
+- interface PySide6 em pt-BR com fluxo Adicionar → Pesquisar → Revisar →
+  Baixar → Concluído, importação, fallback Spotify, revisão editável, seleção,
+  progresso, logs recolhíveis, cancelamento e resumo;
 - workers `QThread` que mantêm operações longas fora da thread da interface.
+
+### Perfis de mídia
+
+O backend também possui perfis validados para áudio AAC, ALAC, FLAC, M4A, MP3,
+Opus, Vorbis e WAV e para vídeo MP4 compatível, MP4 rápido, WebM e original.
+Bitrates e resoluções vêm de listas fechadas. A interface permite escolher
+esses perfis no popover de opções e mantém MP3 192 kbps como padrão.
 
 O visual e seus tokens estão documentados em `DESIGN_SYSTEM.md`. A execução por
 Python e pelo pacote `onedir` foi validada no Windows.
@@ -96,8 +143,8 @@ Python e pelo pacote `onedir` foi validada no Windows.
 - Node no PATH para o suporte JavaScript atual do YouTube no yt-dlp;
 - aria2c opcional.
 
-yt-dlp e PySide6 são dependências de runtime; PyInstaller é dependência de
-desenvolvimento. Os testes automatizados não acessam a rede nem executam
+yt-dlp com seu grupo de dependências `default` — incluindo `yt-dlp-ejs` — e
+PySide6 são dependências de runtime; PyInstaller é dependência de desenvolvimento. Os testes automatizados não acessam a rede nem executam
 FFmpeg: ambos são substituídos por fakes nas verificações dos serviços e da
 interface. Resultados do YouTube podem variar ou exigir atualização do yt-dlp;
 por isso a revisão humana antes do download permanece obrigatória.

@@ -10,6 +10,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 from music_downloader.cancellation import CancellationToken
 from music_downloader.diagnostics import exception_diagnostic
+from music_downloader.download_profiles import DEFAULT_DOWNLOAD_PROFILE, DownloadProfile
 from music_downloader.models import SearchResult
 
 
@@ -61,16 +62,20 @@ class DownloadWorker(QObject):
         approved_results: Iterable[SearchResult],
         output_directory: str | Path,
         *,
+        profile: DownloadProfile = DEFAULT_DOWNLOAD_PROFILE,
         embed_thumbnail: bool,
         aria2c_path: str | None,
+        cookie_browser: str | None = None,
         generation: int = 0,
     ) -> None:
         super().__init__()
         self._service = service
         self._approved_results = tuple(approved_results)
         self._output_directory = output_directory
+        self._profile = profile
         self._embed_thumbnail = embed_thumbnail
         self._aria2c_path = aria2c_path
+        self._cookie_browser = cookie_browser
         self._generation = generation
         self._cancellation = CancellationToken()
 
@@ -87,8 +92,10 @@ class DownloadWorker(QObject):
             result = self._service.download_batch(
                 self._approved_results,
                 self._output_directory,
+                profile=self._profile,
                 embed_thumbnail=self._embed_thumbnail,
                 aria2c_path=self._aria2c_path,
+                cookie_browser=self._cookie_browser,
                 cancellation=self._cancellation,
                 progress_callback=lambda progress: self.progress.emit(
                     self._generation, progress

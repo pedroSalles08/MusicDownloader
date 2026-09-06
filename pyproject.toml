@@ -11,8 +11,13 @@ requires-python = ">=3.11"
 license = { text = "Proprietary" }
 dependencies = [
     "PySide6>=6.8,<7",
-    "yt-dlp>=2026.6.9",
+    "yt-dlp[default]>=2026.6.9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/pedroSalles08/MusicDownloader"
+Repository = "https://github.com/pedroSalles08/MusicDownloader"
+Issues = "https://github.com/pedroSalles08/MusicDownloader/issues"
 
 [project.optional-dependencies]
 dev = [

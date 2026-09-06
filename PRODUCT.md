@@ -12,7 +12,7 @@ O fluxo original usa um script de terminal e listas longas separadas por ponto e
 
 ## MVP obrigatório
 
-1. Receber texto separado por `;`, remover espaços e vazios e deduplicar sem perder a ordem.
+1. Receber nomes, links de vídeos e playlists do YouTube separados por `;`, remover espaços e vazios e deduplicar sem perder a ordem. Nomes são pesquisados; vídeos usam a URL exata; playlists são expandidas em itens revisáveis.
 2. Importar CSV UTF-8/UTF-8 com BOM, reconhecendo variações de colunas de faixa e artista, ignorando linhas inválidas sem derrubar o lote e exibindo um resumo.
 3. Detectar links do Spotify e explicar o fluxo Exportify/CSV; consulta direta é fase 2.
 4. Escolher e validar a pasta de saída.
@@ -25,9 +25,21 @@ O fluxo original usa um script de terminal e listas longas separadas por ponto e
 
 ## Experiência
 
-O fluxo principal usa áreas bem delimitadas para entrada, revisão e downloads, com uma barra de status persistente. A estética combina old web e desktop dos anos 90/2000, sem sacrificar legibilidade: creme e bege como base, verde-água e azul dessaturado como realces, bordas de alto contraste e controles levemente elevados.
+O fluxo principal é progressivo: Adicionar, Pesquisar, Revisar, Baixar e
+Concluído. A janela mostra somente a etapa relevante, sem sidebar, dashboard ou
+painel de atividade permanente. A moldura continua nativa do Windows; o
+conteúdo usa uma direção dark, minimalista e inspirada em aplicativos modernos
+do macOS.
 
-Estados visuais mínimos: aguardando, pesquisando, encontrado, pronto, baixando, concluído, cancelado, sem resultado e erro.
+A entrada universal aceita nomes, vídeos e playlists sem exigir que o usuário
+escolha previamente o tipo. CSV/Spotify e opções técnicas ficam em popovers.
+A revisão usa uma lista compacta com hierarquia musical, seleção, ações
+contextuais e CTA que informa a quantidade escolhida. Pesquisa, download e
+conclusão possuem telas próprias e logs técnicos ficam recolhidos por padrão.
+
+Estados visuais mínimos: aguardando, pesquisando, encontrado, pronto, baixando,
+convertendo, nova tentativa, concluído, cancelado, sem resultado e erro. Todo
+estado combina texto e forma, sem depender somente de cor.
 
 ## Fora do MVP
 
@@ -37,7 +49,18 @@ Estados visuais mínimos: aguardando, pesquisando, encontrado, pronto, baixando,
 - Download de serviços protegidos ou contorno de DRM.
 - Gerenciamento completo de biblioteca musical.
 
+## Saída de áudio e vídeo
+
+O backend aceita perfis fechados para áudio AAC, ALAC, FLAC, M4A, MP3, Opus,
+Vorbis e WAV, além de vídeo MP4 compatível, MP4 rápido, WebM e formato original.
+Qualidade de áudio e resolução são valores validados pelo domínio; a UI não
+deve expor seletores livres do yt-dlp nem argumentos FFmpeg.
+
+MP4 compatível recodifica para H.264/AAC; MP4 rápido preserva os streams e
+depende de combinações MP4/M4A disponíveis na fonte. Formatos sem perdas não
+prometem recuperar qualidade ausente na origem. Esses perfis estão integrados
+ao popover de opções do redesign, mantendo MP3 192 kbps como padrão.
+
 ## Indicadores de conclusão
 
 O fluxo texto/CSV → pesquisa → revisão → download → resumo funciona sem congelar a interface; falhas parciais são isoladas; testes passam; QA final aprova; o executável é gerado e aberto em Windows.
-

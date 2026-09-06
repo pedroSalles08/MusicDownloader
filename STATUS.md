@@ -1,13 +1,181 @@
 # Status do projeto
 
-Atualizado em: 2026-07-20
+Atualizado em: 2026-09-05
 
 ## Estado atual
 
-**Concluído — versão Windows onedir aprovada.** Entradas, serviços, interface,
-build, abertura do executável, inspeção visual nativa e conversão real
-controlada com yt-dlp/FFmpeg passaram por validação. O revisor QA final refez o
-build e encerrou sua análise com `APROVADO`.
+**Integração visual e funcional dos perfis de download de mídia concluída.**
+O popover de opções agora permite selecionar tipo de mídia (Áudio / Vídeo), formatos de áudio (MP3, M4A, Opus, AAC, Vorbis, FLAC, ALAC, WAV) com controle dinâmico de qualidade (128, 192, 256, 320 kbps) ou badge sem perdas, formatos de vídeo (MP4 compatível, MP4 rápido, WebM, Original) com resolução máxima (melhor, 1080p, 720p, 360p), controle automático de thumbnail e sessão do YouTube. O botão de download reflete dinamicamente a mídia, formato e qualidade no singular/plural, as telas de download e conclusão adaptam suas mensagens ao tipo de mídia baixada, e todos os controles do popover obedecem ao estado ocupado da aplicação.
+
+## Evolução atual — integração UI e perfis de mídia
+
+- `OptionsPopover` integrado com `media_kind_combo`, `audio_format_combo`, `audio_quality_combo`, `video_format_combo`, `video_resolution_combo`, `cover_checkbox` e `cookie_browser_combo`.
+- Alternância dinâmica entre container de áudio e container de vídeo com redimensionamento automático.
+- FLAC, ALAC e WAV ocultam o seletor de bitrate e exibem badge "Sem perdas" com dica contextual de qualidade.
+- Formatos de vídeo exibem dica técnica contextual explicativa sobre recodificação / preservação de streams.
+- Thumbnail é desmarcada e desabilitada automaticamente para WAV e Original; ao retornar para formatos com suporte, o controle é reabilitado sem ser remarcado sozinho.
+- `MainWindow` expõe `current_download_profile()`, conecta o sinal `profileChanged` para atualização reativa do botão de ação e repassa o perfil ao `DownloadWorker`.
+- `format_download_cta` formata o CTA com contagem, tipo de mídia, formato e qualidade de forma gramaticalmente correta em pt-BR.
+- Acessibilidade configurada em todos os novos componentes de formulário.
+
+### Evidência automatizada desta evolução
+
+- Testes focados da UI (`tests/test_ui.py`): **32 passaram em 3,84 s**.
+- Suíte completa do projeto: **189 passaram em 3,58 s**.
+- `compileall` de `src` e `tests`: concluído com código 0.
+- Smoke-test Python (`music_downloader --smoke-test`): concluído com código 0.
+- `git diff --check`: concluído sem erros de formatação ou espaços.
+
+## Evolução atual — redesign UI/UX progressivo
+
+- Entrada universal, destino, importação CSV/Spotify e opções técnicas foram
+  reorganizados sem mudar parsing ou contratos de importação.
+- Pesquisa e download possuem telas próprias e minimalistas; detalhes técnicos
+  ficam recolhidos por padrão.
+- A revisão usa `ReviewListModel` e `ReviewItemDelegate`, preservando ordem,
+  seleção inicial, URL/ID aprovado, edição, pesquisa individual e playlists.
+- A conclusão apresenta sucesso de forma simples, diferencia término parcial e
+  oferece abertura da pasta via `QDesktopServices`.
+- `QSplitter`, `QTableWidget`, modo foco e estilos retrô foram removidos após a
+  migração da cobertura funcional.
+- Ícones SVG locais são incorporados por `resources_rc.py`; nenhuma capa é
+  baixada para fins visuais.
+
+### Evidência automatizada do redesign
+
+- Testes focados do QA independente: **39 passaram**.
+- Suíte completa: **144 passaram em 2,53 s**.
+- `compileall` de `src` e `tests`: concluído sem erro.
+- Capturas dos estados Adicionar, Pesquisar, Revisar, Baixar e Concluído foram
+  inspecionadas em 1060 × 760 e no mínimo 720 × 600.
+- Backend nativo `windows` validado em DPI 125%, com maximização em 1536 × 793
+  e restauração/redimensionamento para 760 × 640.
+- Build isolado gerou `dist-redesign\MusicDownloader` com 275 arquivos e
+  130.252.222 bytes. O executável tem 9.802.903 bytes, SHA-256
+  `C060F4903185F0758FDE1516D70B48641E19D832E6FC4780A40B85E920E574E3` e
+  smoke-test concluído com código 0.
+- `pip check` e `git diff --check` concluíram sem erro; o módulo
+  `music_downloader.ui.resources_rc` está presente no PYZ do pacote.
+- Revisão QA independente: **APROVADO**.
+
+## Correção anterior — formatos de áudio e EJS
+
+## Correção atual — formatos de áudio e EJS
+
+- Após a autenticação resolver o bloqueio anti-bot, 24 faixas passaram a falhar
+  com `Requested format is not available`. O vídeo removido por copyright
+  continuou como uma falha individual legítima.
+- A causa confirmada era a instalação simples de `yt-dlp`: Node estava
+  disponível, mas o pacote complementar `yt-dlp-ejs` não estava instalado nem
+  presente no executável.
+- A dependência de runtime agora usa `yt-dlp[default]`, que mantém
+  `yt-dlp-ejs` sincronizado com a versão do extrator e inclui os componentes
+  recomendados pelo projeto upstream.
+- Erros de formato indisponível e vídeo removido são tratados como não
+  transitórios e deixam de consumir três tentativas idênticas por faixa.
+- A validação real, sem baixar mídia, consultou `91Kg7Sc79_E` com a sessão
+  Firefox e encontrou 12 formatos, incluindo 5 com áudio: `140`, `91`,
+  `93`, `18` e `94`. PO Token não foi necessário nesse vídeo.
+
+### Evidência da correção atual
+
+- Testes focados de download e empacotamento: **34 passaram**.
+- Suíte completa: **137 passaram em 2,37 s**.
+- `compileall`, smoke-test Python e `git diff --check` concluíram sem erro.
+- Como `dist\MusicDownloader` estava aberto pelo usuário no PID 19340, o
+  processo não foi encerrado e a correção foi gerada em
+  `dist-ejs\MusicDownloader`.
+- A nova distribuição contém 275 arquivos, 130.232.708 bytes e 5 arquivos EJS.
+  O executável tem 9.783.389 bytes, SHA-256
+  `D74FA7968C7F6635625D6C735FD5A5984D28CB38259B64F667DF0137DAB3E856` e
+  smoke-test bloqueante concluído com código 0.
+
+## Correção anterior — autenticação anti-bot do YouTube
+
+- O diagnóstico real de 25 faixas mostrou 24 recusas `Sign in to confirm
+  you're not a bot` e um vídeo removido por copyright; a expansão da playlist
+  estava correta e a falha ocorria ao baixar cada URL individual sem cookies.
+- A revisão agora oferece `Sessão YouTube` junto ao botão de download, com
+  Firefox, Chrome, Edge, Brave, Vivaldi e Opera e seleção inicial baseada no
+  navegador HTTPS padrão do Windows.
+- O serviço envia ao yt-dlp somente o valor estruturado
+  `cookiesfrombrowser=(browser,)`; valores fora da lista permitida são
+  recusados antes de detectar ferramentas, acessar a rede ou criar o destino.
+- Cookies permanecem sob responsabilidade do yt-dlp e não são exibidos,
+  persistidos pelo aplicativo nem interpolados em comandos de shell.
+- A recusa anti-bot é tratada como falha de autenticação não transitória: não
+  repete inutilmente três vezes e orienta selecionar, autenticar, fechar ou
+  trocar o navegador. Vídeos realmente removidos continuam como falha isolada.
+
+### Evidência da correção atual
+
+- Testes focados de cookies, download, workers e UI: **62 passaram**.
+- Suíte completa: **134 passaram em 2,20 s**.
+- `compileall`, smoke-test Python e `git diff --check` concluíram sem erros; os
+  testes não acessam rede real nem cookies reais do usuário.
+- `packaging/build.ps1 -SkipInstall` gerou `dist\MusicDownloader` com 217
+  arquivos e 125.662.991 bytes. O executável tem 8.351.826 bytes, SHA-256
+  `38E0F3C8849CB92F15874959705727EAC6A833CA38D66B0AA15CBD69DAB1D57C` e
+  smoke-test bloqueante concluído com código 0.
+
+## Evolução atual — usabilidade da revisão
+
+- `QSplitter` vertical acessível e redimensionável permanece como estrutura das
+  seções 01, 02 e 03; a revisão recebe a maior altura inicial.
+- Pesquisa concluída compacta entrada e atividade. O resumo da entrada preserva
+  quantidade, destino e botão para reabrir; progresso, resumo e acesso ao log
+  permanecem disponíveis na atividade compacta.
+- `AMPLIAR ⛶` ativa o modo foco dentro da mesma janela e `RESTAURAR` devolve os
+  painéis com seus estados, dados, seleção e rolagem preservados.
+- Tabela com linhas de 46 px, cabeçalho fixo, colunas interativas e responsivas,
+  seleção estreita e tooltips completos de consulta e título.
+- Painel recolhível da faixa selecionada mostra consulta, título, canal,
+  duração, URL e status e reutiliza a pesquisa individual existente.
+- Cancelamento permanece visível no cabeçalho da revisão durante operações,
+  inclusive em modo foco.
+
+### Evidência da evolução atual
+
+- Testes de UI focados: **22 passaram**.
+- Suíte completa: **119 passaram em 2,05 s**.
+- `compileall`, smoke-test Python e `git diff --check` — concluídos sem erro.
+- Renderização nativa Windows inspecionada nos estados compacto e foco; sem
+  sobreposição, corte de controles ou perda da estética retrô.
+- Revisão QA independente: **22 testes de UI e 119 testes completos passaram;
+  REVISOR_QA: APROVADO**.
+- A distribuição anterior estava aberta e bloqueou sua substituição segura; o
+  processo do usuário não foi encerrado. A nova versão foi gerada em
+  `dist-review\\MusicDownloader` com 217 arquivos e 125.659.987 bytes.
+- O novo `MusicDownloader.exe` tem 8.348.822 bytes, SHA-256
+  `FB75BA8CE30A41E3A6B66FC9A986E804CDA614EAD346A6986AECE8C05C2D0062` e
+  smoke bloqueante concluído com código 0.
+
+## Evolução atual — links e playlists do YouTube
+
+- Entradas separadas por `;` podem misturar nomes, vídeos e playlists.
+- Nomes continuam usando `ytsearch1`; links reconhecidos de vídeos usam a URL
+  exata, sem pesquisa textual intermediária.
+- Playlists são extraídas sem download e expandidas em uma linha marcada por
+  vídeo, preservando a ordem e usando a URL individual em cada resultado.
+- A pesquisa individual de uma faixa expandida usa sua URL direta e não reabre
+  a playlist completa.
+- A expansão usa iteração lazy e observa cancelamento entre entradas; falhas e
+  playlists sem vídeos válidos permanecem estados revisáveis.
+- A UI e sua descrição acessível informam explicitamente a entrada mista.
+
+### Evidência da evolução atual
+
+- `.\\.venv\\Scripts\\python.exe -m pytest` — **115 passaram em 2,14 s**.
+- `compileall`, smoke-test Python e `git diff --check` — concluídos sem erro.
+- O primeiro ciclo QA reproduziu dois problemas: nova pesquisa reabria a
+  playlist e a expansão não observava cancelamento. Ambos receberam correções
+  específicas e testes de regressão.
+- Segundo ciclo QA: **41 testes focados e 115 testes completos passaram;
+  REVISOR_QA: APROVADO**.
+- `packaging/build.ps1 -SkipInstall` gerou a nova distribuição com 217 arquivos
+  e 125.652.973 bytes. `MusicDownloader.exe` tem 8.341.808 bytes e SHA-256
+  `5CB85E3209783DE639FB04D21EA03F8E1C1DB3036E53008387FE6D75A1E45331`.
+- O smoke do novo `.exe` encerrou com código 0.
 
 ## Implementado nesta etapa
 
@@ -102,9 +270,9 @@ build e encerrou sua análise com `APROVADO`.
 
 ## Próximos passos opcionais
 
-Gate concluído. Próximas evoluções opcionais podem incluir instalador,
-assinatura de código e integração direta com Spotify mediante solução robusta
-de autenticação; nenhuma delas bloqueia o MVP entregue.
+Gate funcional concluído. Próximas evoluções opcionais podem incluir assinatura
+de código e integração direta com Spotify mediante solução robusta de
+autenticação; nenhuma delas bloqueia o MVP entregue.
 
 ## Revisão da etapa
 
@@ -132,3 +300,36 @@ Nenhum bloqueio técnico confirmado. O acesso direto a playlists Spotify
 permanece fora do MVP e não bloqueia a entrega. A variabilidade da pesquisa do
 YouTube exige revisão humana; nesta validação, a divergência de ID foi detectada
 e nenhum conteúdo ambíguo foi baixado.
+
+## Etapa 7 — Distribuição pública (em validação)
+
+- Build hermético evita coletar DLLs expostas por runtimes de ferramentas no
+  `PATH`; uma primeira tentativa contaminada falhou no QtCore e foi descartada.
+- O executável possui metadados Windows de produto, descrição e versão 0.1.0.0.
+- O instalador Inno Setup 6 é por usuário, grava em `%LOCALAPPDATA%`, registra
+  desinstalação e App Paths em HKCU e cria atalho no Menu Iniciar. Atalho e
+  processo usam o AppUserModelID explícito `PedroSalles08.MusicDownloader`.
+- O Windows Search desta máquina não enumerou o atalho do Menu Iniciar nem após
+  reinício, mas indexou imediatamente o atalho oficial da Área de Trabalho. Essa
+  opção agora vem selecionada por padrão no instalador como fallback de busca.
+- Um atalho manual antigo chamado `MusicDownloader.exe - Atalho (2)`, que
+  apontava para `dist-redesign`, foi removido para a Lixeira. A consulta ao
+  índice passou a retornar apenas `Music Downloader.lnk` como `link,program`,
+  apontando para o executável instalado em `%LOCALAPPDATA%`.
+- Upgrades removem somente `_internal`, o executável e atalhos gerenciados antes
+  de copiar a versão nova; arquivo estranho criado na raiz foi preservado no
+  teste de QA.
+- Desinstalação silenciosa removeu executável, atalhos e registro gerenciado;
+  reinstalação terminou com código 0 e o app instalado passou no smoke-test.
+- A suíte completa passou com **197 testes**; o ciclo corretivo adicionou testes
+  de metadados, identidade do aplicativo e empacotamento.
+- Artefatos locais em `release\`: instalador, ZIP portátil e `SHA256SUMS.txt`.
+  Eles permanecem ignorados pelo Git e serão anexados à GitHub Release.
+- A primeira estratégia usava um AUMID cujo segmento de publicador começava em
+  minúscula e não apareceu em `Get-StartApps` mesmo após novo login. O ciclo
+  corretivo adotou um identificador PascalCase, igual no processo e no atalho.
+- Primeiro ciclo de QA da distribuição: **REPROVADO** por atalho sem AUMID,
+  documentação contraditória e ausência do repositório/release pública. AUMID
+  e documentação foram corrigidos; a publicação aguardava a nova aprovação.
+- Ciclo final de QA: **197 testes passaram**, hashes e smokes do instalado e do
+  ZIP conferiram, atalhos e índice foram validados; **REVISOR_QA: APROVADO**.
