@@ -336,3 +336,6 @@ e nenhum conteúdo ambíguo foi baixado.
 - Repositório público: <https://github.com/pedroSalles08/MusicDownloader>.
 - Primeira release pública: <https://github.com/pedroSalles08/MusicDownloader/releases/tag/v0.1.0>,
   com instalador, ZIP portátil e `SHA256SUMS.txt` disponíveis para download.
+- A primeira execução remota passou nos testes, mas falhou no build porque
+  `-SkipInstall` deixou o ambiente virtual local sem PyInstaller. O workflow foi
+  corrigido para instalar as dependências dentro do ambiente usado pelo build.

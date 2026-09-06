@@ -114,7 +114,8 @@ def test_github_workflow_builds_and_publishes_tagged_releases() -> None:
     assert "tags:" in workflow
     assert '- "v*"' in workflow
     assert "python -m pytest -q" in workflow
-    assert "build_release.ps1 -SkipInstall -SkipTests" in workflow
+    assert "build_release.ps1 -SkipTests" in workflow
+    assert "build_release.ps1 -SkipInstall" not in workflow
     assert "gh release create" in workflow
     assert "gh release view" in workflow
     assert "gh release upload" in workflow

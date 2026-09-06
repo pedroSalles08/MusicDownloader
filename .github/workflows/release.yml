@@ -36,7 +36,7 @@ jobs:
 
       - name: Gerar instalador e pacote portátil
         shell: pwsh
-        run: .\packaging\build_release.ps1 -SkipInstall -SkipTests
+        run: .\packaging\build_release.ps1 -SkipTests
 
       - name: Disponibilizar artefatos do workflow
         uses: actions/upload-artifact@v4
