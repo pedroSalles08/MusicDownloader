@@ -339,3 +339,6 @@ e nenhum conteúdo ambíguo foi baixado.
 - A primeira execução remota passou nos testes, mas falhou no build porque
   `-SkipInstall` deixou o ambiente virtual local sem PyInstaller. O workflow foi
   corrigido para instalar as dependências dentro do ambiente usado pelo build.
+- A execução corretiva da tag `v0.1.0` concluiu em **3 min 20 s**: testes,
+  build, upload do artefato e atualização idempotente da release passaram. Os
+  hashes publicados conferem com o `SHA256SUMS.txt` remoto.
