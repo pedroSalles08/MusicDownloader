@@ -91,11 +91,16 @@ def test_process_uses_same_explicit_windows_app_identity() -> None:
 def test_windows_executable_has_version_metadata() -> None:
     spec = (PROJECT_ROOT / "MusicDownloader.spec").read_text("utf-8")
     version_info = (PROJECT_ROOT / "packaging" / "version_info.txt").read_text("utf-8")
+    configuration = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text("utf-8"))
+    version = configuration["project"]["version"]
+    windows_version = f"{version}.0"
 
     assert "version=str(VERSION_INFO)" in spec
     assert "StringStruct('FileDescription', 'Music Downloader')" in version_info
     assert "StringStruct('ProductName', 'Music Downloader')" in version_info
-    assert "StringStruct('ProductVersion', '0.1.0.0')" in version_info
+    assert f"StringStruct('ProductVersion', '{windows_version}')" in version_info
+    assert f"StringStruct('FileVersion', '{windows_version}')" in version_info
+    assert f"prodvers=({', '.join(version.split('.'))}, 0)" in version_info
 
 
 def test_release_build_creates_installer_portable_zip_and_checksums() -> None:

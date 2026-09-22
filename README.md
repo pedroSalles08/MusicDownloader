@@ -35,7 +35,8 @@ código, o Windows SmartScreen pode exibir um aviso na primeira execução.
   Brave, Vivaldi ou Opera;
 - componentes EJS empacotados para resolver os desafios JavaScript atuais do
   YouTube e recuperar formatos de áudio;
-- interface dark progressiva com comportamento nativo do Windows;
+- interface dark progressiva “Midnight Deck”, com etapa atual, botões
+  autoexplicativos e comportamento nativo do Windows;
 - executável para Windows.
 
 Links públicos do Spotify serão reconhecidos, mas a importação direta não faz parte do MVP; o aplicativo orientará o uso de Exportify e CSV.

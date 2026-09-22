@@ -1,13 +1,54 @@
 # Status do projeto
 
-Atualizado em: 2026-09-05
+Atualizado em: 2026-09-22
 
 ## Estado atual
 
-**Integração visual e funcional dos perfis de download de mídia concluída.**
-O popover de opções agora permite selecionar tipo de mídia (Áudio / Vídeo), formatos de áudio (MP3, M4A, Opus, AAC, Vorbis, FLAC, ALAC, WAV) com controle dinâmico de qualidade (128, 192, 256, 320 kbps) ou badge sem perdas, formatos de vídeo (MP4 compatível, MP4 rápido, WebM, Original) com resolução máxima (melhor, 1080p, 720p, 360p), controle automático de thumbnail e sessão do YouTube. O botão de download reflete dinamicamente a mídia, formato e qualidade no singular/plural, as telas de download e conclusão adaptam suas mensagens ao tipo de mídia baixada, e todos os controles do popover obedecem ao estado ocupado da aplicação.
+**Refinamento visual e de affordances Midnight Deck concluído e validado.**
+O fluxo progressivo e o backend permanecem intactos, mas a interface ganhou uma
+identidade musical própria, indicador das cinco etapas, perfil de saída visível,
+botões com rótulos acionáveis, feedback de entrada/seleção/destino, pesquisa com
+progresso determinístico e estados de revisão mais legíveis.
 
-## Evolução atual — integração UI e perfis de mídia
+## Evolução atual — refinamento UI/UX Midnight Deck
+
+- A linguagem visual deixou de reproduzir um dark genérico inspirado no macOS e
+  passou a usar grafite azulado, texto quente, azul mineral, âmbar e microtexto
+  monoespaçado, conforme `DESIGN_SYSTEM.md` e a ADR-014.
+- O cabeçalho exibe `etapa / total`, nome da etapa e uma linha de fluxo em forma
+  de playhead; a informação acessível acompanha cada transição.
+- A entrada mostra quantidade válida e duplicatas, desabilita a pesquisa vazia
+  com orientação e transforma o CTA em `Pesquisar N itens`.
+- `Importar`, `Opções`, `Alterar…`, `Mais ações`, `Ver detalhes` e
+  `Nova operação` receberam rótulos mais específicos e ícones SVG locais.
+- O formato efetivo (`MP3 · 192 kbps`, `FLAC`, `MP4 compatível · até 1080p`)
+  permanece visível fora do popover; o CTA curto informa ação e quantidade.
+- A revisão ganhou contagem selecionada, status em cápsulas textuais, affordance
+  de ações e dock de destino com explicação do motivo de bloqueio/prontidão.
+- Caminhos longos usam elipse central, mantendo o valor completo em tooltip e
+  nome acessível. A navegação move o foco para a tela ativa e respeita a
+  preferência Qt por animações de widgets.
+- Capturas dos cinco estados foram inspecionadas em 1060 × 760; Adicionar e
+  Revisar também foram validados no mínimo de 720 × 600.
+
+### Evidência automatizada desta evolução
+
+- Testes focados da UI (`tests/test_ui.py`): **36 passaram**.
+- Suíte completa do projeto: **198 passaram em 3,59 s**.
+- `compileall` de `src` e `tests`, smoke Python e `git diff --check`: código 0.
+- O módulo gerado de recursos contém os novos SVGs e
+  `music_downloader.ui.resources_rc` está presente no arquivo PYZ.
+- Build final isolado em `dist-ui-polish-final\MusicDownloader`: 236 arquivos,
+  128.416.568 bytes. O executável tem 9.828.801 bytes, SHA-256
+  `5E5D869E898B26323BD9DFA65FCB0E5FF2ECAC4BBEF0D5892B1151E60FFE7B04` e
+  smoke-test concluído com código 0.
+- Revisão QA independente da interface: **APROVADO**; verificou diff, suíte,
+  importação CSV, erros, cancelamento, acessibilidade básica, cinco etapas e
+  layout mínimo. A captura offscreen não valida a fonte no Windows real.
+- Versão `0.1.1` preparada para publicar a nova interface como release mais
+  recente, preservando a release `v0.1.0` anterior.
+
+## Evolução anterior — integração UI e perfis de mídia
 
 - `OptionsPopover` integrado com `media_kind_combo`, `audio_format_combo`, `audio_quality_combo`, `video_format_combo`, `video_resolution_combo`, `cover_checkbox` e `cookie_browser_combo`.
 - Alternância dinâmica entre container de áudio e container de vídeo com redimensionamento automático.

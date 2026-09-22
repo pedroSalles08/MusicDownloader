@@ -72,6 +72,14 @@
 - [x] Validar instalador, atalho e desinstalação.
 - [x] Publicar repositório e primeira release pública após QA independente.
 
+## Etapa 8 — Refinamento visual e affordances
+
+- [x] Auditar o redesign nas larguras 1060 × 760 e 720 × 600.
+- [x] Tornar entrada, perfil de saída, destino e ações secundárias autoexplicativos.
+- [x] Introduzir indicador real das cinco etapas e progresso determinístico de pesquisa.
+- [x] Aplicar a identidade Midnight Deck sem alterar o fluxo progressivo ou o backend.
+- [x] Atualizar ícones, estados de revisão, testes de UI e documentação visual.
+
 ## Estratégia de commits
 
 Um commit pequeno após cada etapa aprovada: fundação; domínio/importação; serviços; UI; robustez; pacote final. Arquivos de entrada fornecidos pelo usuário permanecem versionados como referência, salvo decisão documentada em contrário.

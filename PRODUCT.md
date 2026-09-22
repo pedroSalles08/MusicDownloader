@@ -28,14 +28,16 @@ O fluxo original usa um script de terminal e listas longas separadas por ponto e
 O fluxo principal é progressivo: Adicionar, Pesquisar, Revisar, Baixar e
 Concluído. A janela mostra somente a etapa relevante, sem sidebar, dashboard ou
 painel de atividade permanente. A moldura continua nativa do Windows; o
-conteúdo usa uma direção dark, minimalista e inspirada em aplicativos modernos
-do macOS.
+conteúdo usa a direção dark Midnight Deck: hierarquia minimalista, sinais de
+equipamento musical e comportamento nativo do Windows, sem imitar outro
+sistema operacional.
 
 A entrada universal aceita nomes, vídeos e playlists sem exigir que o usuário
 escolha previamente o tipo. CSV/Spotify e opções técnicas ficam em popovers.
 A revisão usa uma lista compacta com hierarquia musical, seleção, ações
-contextuais e CTA que informa a quantidade escolhida. Pesquisa, download e
-conclusão possuem telas próprias e logs técnicos ficam recolhidos por padrão.
+contextuais, perfil de saída visível e CTA que informa a quantidade escolhida.
+O cabeçalho mostra a etapa real do fluxo; pesquisa, download e conclusão
+possuem telas próprias e logs técnicos ficam recolhidos por padrão.
 
 Estados visuais mínimos: aguardando, pesquisando, encontrado, pronto, baixando,
 convertendo, nova tentativa, concluído, cancelado, sem resultado e erro. Todo

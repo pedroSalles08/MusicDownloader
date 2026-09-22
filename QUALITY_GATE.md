@@ -60,6 +60,17 @@ Uma etapa só é aprovada com critérios verificáveis e revisão independente. 
 - [x] Repositório e primeira GitHub Release estão públicos.
 - [x] Revisão independente termina em `APROVADO`.
 
+## Gate incremental — refinamento Midnight Deck
+
+- [x] As cinco etapas possuem indicador textual e visual no cabeçalho.
+- [x] Entrada, perfil de saída, seleção e destino possuem feedback persistente.
+- [x] Botões secundários descrevem a ação e usam SVGs locais consistentes.
+- [x] Pesquisa informa progresso processado/total sem bloquear a interface.
+- [x] Status da revisão combinam texto, forma e cor; o CTA não repete metadados.
+- [x] Contraste dos tokens, nomes acessíveis e carregamento dos ícones têm testes.
+- [x] Layout foi inspecionado em 1060 × 760 e 720 × 600.
+- [x] Suíte completa, compileall, smoke Python, build isolado e smoke do `.exe` passam.
+
 ## Evidência por etapa
 
 Registre comandos, resultado, itens não testados e limitações. Testes de rede real complementam, mas não substituem, testes determinísticos com fakes.

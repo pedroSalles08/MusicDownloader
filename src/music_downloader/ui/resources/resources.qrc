@@ -5,5 +5,17 @@
     <file alias="success.svg">icons/success.svg</file>
     <file alias="warning.svg">icons/warning.svg</file>
     <file alias="folder.svg">icons/folder.svg</file>
+    <file alias="folder-open.svg">icons/folder-open.svg</file>
+    <file alias="folder-open-dark.svg">icons/folder-open-dark.svg</file>
+    <file alias="import.svg">icons/import.svg</file>
+    <file alias="import-dark.svg">icons/import-dark.svg</file>
+    <file alias="sliders.svg">icons/sliders.svg</file>
+    <file alias="search.svg">icons/search.svg</file>
+    <file alias="arrow-left.svg">icons/arrow-left.svg</file>
+    <file alias="more.svg">icons/more.svg</file>
+    <file alias="download.svg">icons/download.svg</file>
+    <file alias="close.svg">icons/close.svg</file>
+    <file alias="details.svg">icons/details.svg</file>
+    <file alias="refresh.svg">icons/refresh.svg</file>
   </qresource>
 </RCC>

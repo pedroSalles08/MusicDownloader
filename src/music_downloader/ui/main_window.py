@@ -10,7 +10,7 @@ from typing import Any
 
 from PySide6.QtCore import QEasingCurve, QModelIndex, QPropertyAnimation, QThread, QTimer, Qt, QUrl
 from PySide6.QtGui import QCloseEvent, QDesktopServices
-from PySide6.QtWidgets import QFileDialog, QGraphicsOpacityEffect, QMainWindow, QMenu
+from PySide6.QtWidgets import QFileDialog, QGraphicsOpacityEffect, QMainWindow, QMenu, QStyle
 
 from music_downloader.csv_importer import import_exportify_csv
 from music_downloader.diagnostics import exception_diagnostic
@@ -40,6 +40,7 @@ from music_downloader.ui.pages import (
     OptionsPopover,
     ReviewPage,
     SearchPage,
+    format_profile_summary,
 )
 from music_downloader.ui.review_model import ReviewItemDelegate, ReviewListModel, format_duration
 from music_downloader.ui.styles import APP_STYLESHEET
@@ -64,6 +65,14 @@ _DOWNLOAD_STATUS_TEXT = {
     DownloadProgressStatus.COMPLETED: "Concluído",
     DownloadProgressStatus.ERROR: "Falha",
     DownloadProgressStatus.CANCELLED: "Cancelado",
+}
+
+_FLOW_STAGE_PRESENTATION = {
+    FlowStage.ADD: (0, "Adicionar"),
+    FlowStage.SEARCHING: (1, "Pesquisar"),
+    FlowStage.REVIEW: (2, "Revisar"),
+    FlowStage.DOWNLOADING: (3, "Baixar"),
+    FlowStage.COMPLETE: (4, "Concluído"),
 }
 
 
@@ -166,6 +175,10 @@ class MainWindow(QMainWindow):
         self.options_popover = OptionsPopover(self)
         self.setCentralWidget(self.shell)
 
+        profile_summary = format_profile_summary(DEFAULT_DOWNLOAD_PROFILE)
+        self.add_page.set_profile_summary(profile_summary)
+        self.review_page.set_profile_summary(profile_summary)
+
         # Stable aliases used by integrations and existing tests.
         self.input_edit = self.add_page.input_edit
         self.destination_edit = self.add_page.destination_edit
@@ -197,6 +210,7 @@ class MainWindow(QMainWindow):
         self.add_page.options_button.clicked.connect(self._show_options_from_add)
         self.add_page.browse_button.clicked.connect(self.choose_destination)
         self.add_page.search_button.clicked.connect(self.prepare_and_search)
+        self.add_page.input_edit.textChanged.connect(self._input_changed)
         self.add_page.destination_edit.textChanged.connect(self._destination_changed)
 
         self.import_popover.csvRequested.connect(self.choose_csv)
@@ -234,6 +248,8 @@ class MainWindow(QMainWindow):
         self.completion_page.open_folder_button.clicked.connect(self.open_destination_folder)
         self.completion_page.new_operation_button.clicked.connect(self.start_new_operation)
 
+        self._input_changed()
+
     def _configure_accessibility(self) -> None:
         self.input_edit.setAccessibleName("Músicas e links")
         self.input_edit.setAccessibleDescription(
@@ -267,8 +283,13 @@ class MainWindow(QMainWindow):
         changed = stage is not self._stage or self.shell.stack.currentWidget() is not self._pages[stage]
         self._stage = stage
         page = self._pages[stage]
+        stage_index, stage_label = _FLOW_STAGE_PRESENTATION[stage]
+        self.shell.set_stage(stage_index, stage_label)
         self.shell.stack.setCurrentWidget(page)
-        if changed and self.isVisible():
+        animations_enabled = bool(
+            self.style().styleHint(QStyle.StyleHint.SH_Widget_Animate)
+        )
+        if changed and self.isVisible() and animations_enabled:
             effect = QGraphicsOpacityEffect(page)
             page.setGraphicsEffect(effect)
             animation = QPropertyAnimation(effect, b"opacity", self)
@@ -276,13 +297,26 @@ class MainWindow(QMainWindow):
             animation.setStartValue(0.86)
             animation.setEndValue(1.0)
             animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-            animation.finished.connect(lambda target=page: target.setGraphicsEffect(None))
+            animation.finished.connect(effect.deleteLater)
             self._page_animation = animation
             animation.start()
         if stage is FlowStage.REVIEW:
             self._refresh_review_page()
         if stage is FlowStage.ADD:
             self.add_page.input_edit.setFocus(Qt.FocusReason.OtherFocusReason)
+        elif stage is FlowStage.SEARCHING:
+            self.search_page.cancel_button.setFocus(Qt.FocusReason.OtherFocusReason)
+        elif stage is FlowStage.REVIEW:
+            self.review_page.list_view.setFocus(Qt.FocusReason.OtherFocusReason)
+        elif stage is FlowStage.DOWNLOADING:
+            self.download_page.details_button.setFocus(Qt.FocusReason.OtherFocusReason)
+        elif stage is FlowStage.COMPLETE:
+            target = (
+                self.completion_page.open_folder_button
+                if self.completion_page.open_folder_button.isEnabled()
+                else self.completion_page.new_operation_button
+            )
+            target.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _show_import_popover(self) -> None:
         self.options_popover.hide()
@@ -295,6 +329,24 @@ class MainWindow(QMainWindow):
     def _show_options_from_review(self) -> None:
         self.import_popover.hide()
         self.options_popover.show_for(self.review_page.options_button)
+
+    def _input_changed(self) -> None:
+        parsed = parse_semicolon_list(self.input_edit.toPlainText())
+        count = len(parsed.queries)
+        self.add_page.set_input_summary(count, parsed.duplicate_count)
+        if count == 0:
+            label = "Pesquisar músicas"
+            tooltip = "Adicione pelo menos uma música ou link para pesquisar."
+        elif count == 1:
+            label = "Pesquisar 1 item"
+            tooltip = "Pesquisar este item no YouTube para revisão."
+        else:
+            label = f"Pesquisar {count} itens"
+            tooltip = f"Pesquisar estes {count} itens no YouTube para revisão."
+        self.search_button.setText(label)
+        self.search_button.setAccessibleName(label)
+        self.search_button.setToolTip(tooltip)
+        self.search_button.setEnabled(count > 0 and not self._busy)
 
     def _destination_changed(self, value: str) -> None:
         self.review_page.set_destination(value.strip())
@@ -412,7 +464,7 @@ class MainWindow(QMainWindow):
             self._research_previous_result = item.result if item else None
             self.review_model.set_status(target_row, "Pesquisando novamente")
         self._search_target_row = target_row
-        self.search_page.reset()
+        self.search_page.reset(len(query_tuple))
         self._transition_to(FlowStage.SEARCHING)
         worker = SearchWorker(self.search_service, query_tuple, generation=generation)
         worker.progress.connect(self._on_search_progress)
@@ -446,7 +498,11 @@ class MainWindow(QMainWindow):
         )
         if progress.result.status is SearchStatus.FOUND:
             self._search_found_count += 1
-            self.search_page.set_found_count(self._search_found_count)
+        self.search_page.set_progress(
+            progress.processed_items,
+            progress.total_items,
+            self._search_found_count,
+        )
 
     def _on_search_completed(self, generation: int, batch: SearchBatchResult) -> None:
         if not self._accept_event(generation) or self._search_terminal:
@@ -510,6 +566,7 @@ class MainWindow(QMainWindow):
         )
         review = len(self.search_results) - found
         self.review_page.update_summary(found, review)
+        self.review_page.update_selected_count(self.review_model.selected_count)
         self.review_page.set_destination(self.destination_edit.text().strip())
         has_rows = self.review_model.rowCount() > 0
         self.review_page.select_found_button.setVisible(has_rows)
@@ -522,7 +579,8 @@ class MainWindow(QMainWindow):
     ) -> None:
         self.review_page.more_button.setEnabled(current.isValid() and not self._busy)
 
-    def _selection_changed(self, _count: int) -> None:
+    def _selection_changed(self, count: int) -> None:
+        self.review_page.update_selected_count(count)
         self._update_download_button()
 
     def select_all_found(self) -> None:
@@ -534,7 +592,11 @@ class MainWindow(QMainWindow):
     def _selected_results(self) -> tuple[list[SearchResult], list[int]]:
         return self.review_model.selected_results()
 
-    def _on_profile_changed(self, _profile: DownloadProfile | None) -> None:
+    def _on_profile_changed(self, profile: DownloadProfile | None) -> None:
+        if profile is not None:
+            summary = format_profile_summary(profile)
+            self.add_page.set_profile_summary(summary)
+            self.review_page.set_profile_summary(summary)
         self._update_download_button()
 
     def current_download_profile(self) -> DownloadProfile:
@@ -545,13 +607,21 @@ class MainWindow(QMainWindow):
             profile = self.current_download_profile()
         except (TypeError, ValueError):
             message = "Configuração de formato inválida"
+            self.add_page.set_profile_summary("Formato inválido")
+            self.review_page.set_profile_summary("Formato inválido")
             self.review_page.download_button.setText(message)
             self.review_page.download_button.setToolTip(
                 "Abra Opções e selecione um tipo, formato e qualidade válidos."
             )
             self.review_page.download_button.setAccessibleName(message)
             self.review_page.download_button.setEnabled(False)
+            self.review_page.download_hint_label.setText(
+                "Abra o formato e escolha uma configuração válida."
+            )
             return
+        summary = format_profile_summary(profile)
+        self.add_page.set_profile_summary(summary)
+        self.review_page.set_profile_summary(summary)
         self.review_page.update_download_cta(
             self.review_model.selected_count,
             has_destination=bool(self.destination_edit.text().strip()) and not self._busy,
@@ -930,6 +1000,10 @@ class MainWindow(QMainWindow):
             busy and self._operation == "download"
         )
         self.import_popover.setEnabled(not busy)
+        self.review_page.more_button.setEnabled(
+            not busy and self.review_page.list_view.currentIndex().isValid()
+        )
+        self._input_changed()
         self._update_download_button()
 
     @staticmethod

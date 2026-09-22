@@ -5,8 +5,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, Qt, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import (
+    QEasingCurve,
+    QPoint,
+    QPropertyAnimation,
+    QRectF,
+    QSize,
+    Qt,
+    Signal,
+)
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,7 +34,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from music_downloader.browser_cookies import COOKIE_BROWSER_LABELS, detect_default_cookie_browser
+from music_downloader.browser_cookies import (
+    COOKIE_BROWSER_LABELS,
+    detect_default_cookie_browser,
+)
 from music_downloader.download_profiles import (
     AUDIO_BITRATE_CHOICES,
     DEFAULT_DOWNLOAD_PROFILE,
@@ -37,6 +48,101 @@ from music_downloader.download_profiles import (
     VideoFormat,
 )
 from music_downloader.ui import resources_rc as _resources_rc  # noqa: F401
+from music_downloader.ui.styles import (
+    ACCENT,
+    CUE,
+    SEPARATOR,
+    SURFACE_HOVER,
+    TEXT_TERTIARY,
+)
+
+
+def _set_button_icon(button: QPushButton | QToolButton, name: str) -> None:
+    """Apply one consistently sized local outline icon to a text button."""
+
+    button.setIcon(QIcon(f":/icons/{name}.svg"))
+    button.setIconSize(QSize(16, 16))
+
+
+class FlowRail(QWidget):
+    """A compact playhead-like indicator for the five real workflow stages."""
+
+    STAGE_COUNT = 5
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._stage = 0
+        self.setFixedSize(164, 16)
+        self.setAccessibleName("Progresso do fluxo")
+
+    def set_stage(self, stage: int, label: str) -> None:
+        self._stage = min(max(0, stage), self.STAGE_COUNT - 1)
+        self.setAccessibleDescription(
+            f"Etapa {self._stage + 1} de {self.STAGE_COUNT}: {label}."
+        )
+        self.update()
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 - Qt API
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        left = 7.0
+        right = float(self.width() - 7)
+        middle = self.height() / 2
+        interval = (right - left) / (self.STAGE_COUNT - 1)
+        points = [left + interval * index for index in range(self.STAGE_COUNT)]
+
+        painter.setPen(QPen(QColor(SEPARATOR), 2.0))
+        painter.drawLine(round(left), round(middle), round(right), round(middle))
+        painter.setPen(QPen(QColor(ACCENT), 2.0))
+        painter.drawLine(
+            round(left), round(middle), round(points[self._stage]), round(middle)
+        )
+
+        for index, x in enumerate(points):
+            if index < self._stage:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(ACCENT))
+                radius = 3.5
+            elif index == self._stage:
+                painter.setPen(QPen(QColor(CUE), 2.0))
+                painter.setBrush(QColor("#0E131A"))
+                radius = 5.0
+            else:
+                painter.setPen(QPen(QColor(TEXT_TERTIARY), 1.2))
+                painter.setBrush(QColor(SURFACE_HOVER))
+                radius = 3.0
+            painter.drawEllipse(
+                QRectF(x - radius, middle - radius, radius * 2, radius * 2)
+            )
+
+
+class ElidedPathLabel(QLabel):
+    """Keep long Windows paths inside compact action areas without losing the tooltip."""
+
+    def __init__(self, text: str = "", parent=None) -> None:
+        super().__init__(parent)
+        self._full_text = text
+        self.setMinimumWidth(0)
+        self._refresh_text()
+
+    def set_path(self, value: str) -> None:
+        self._full_text = value
+        self.setToolTip(value)
+        self.setAccessibleName(
+            f"Pasta de destino: {value}" if value else "Pasta de destino não definida"
+        )
+        self._refresh_text()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt API
+        super().resizeEvent(event)
+        self._refresh_text()
+
+    def _refresh_text(self) -> None:
+        visible = self._full_text or "Destino não definido"
+        width = max(40, self.contentsRect().width())
+        super().setText(
+            self.fontMetrics().elidedText(visible, Qt.TextElideMode.ElideMiddle, width)
+        )
 
 
 class NoticeBanner(QLabel):
@@ -101,6 +207,7 @@ class ImportPopover(PopupFrame):
 
         self.csv_button = QPushButton("Importar arquivo CSV…")
         self.csv_button.setObjectName("primaryButton")
+        _set_button_icon(self.csv_button, "import-dark")
         self.csv_button.clicked.connect(self.csvRequested)
         layout.addWidget(self.csv_button)
 
@@ -546,17 +653,49 @@ class AppShell(QFrame):
 
         top_bar = QFrame()
         top_bar.setObjectName("topBar")
-        top_bar.setFixedHeight(54)
+        top_bar.setFixedHeight(66)
         top_layout = QHBoxLayout(top_bar)
-        top_layout.setContentsMargins(24, 12, 24, 12)
+        top_layout.setContentsMargins(20, 9, 22, 9)
+        top_layout.setSpacing(10)
+
+        brand_mark = QFrame()
+        brand_mark.setObjectName("brandMark")
+        brand_mark.setFixedSize(36, 36)
+        mark_layout = QHBoxLayout(brand_mark)
+        mark_layout.setContentsMargins(8, 8, 8, 8)
+        mark_icon = QLabel()
+        mark_icon.setPixmap(QIcon(":/icons/music.svg").pixmap(20, 20))
+        mark_layout.addWidget(mark_icon)
+        top_layout.addWidget(brand_mark)
+
+        brand_text = QVBoxLayout()
+        brand_text.setSpacing(0)
         wordmark = QLabel("Music Downloader")
         wordmark.setObjectName("wordmark")
-        top_layout.addWidget(wordmark)
+        brand_text.addWidget(wordmark)
+        brand_micro = QLabel("PREPARAR · REVISAR · SALVAR")
+        brand_micro.setObjectName("brandMicro")
+        brand_text.addWidget(brand_micro)
+        top_layout.addLayout(brand_text)
         top_layout.addStretch(1)
+
+        progress_layout = QVBoxLayout()
+        progress_layout.setSpacing(1)
+        self.stage_label = QLabel("01 / 05 · ADICIONAR")
+        self.stage_label.setObjectName("stageLabel")
+        self.stage_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        progress_layout.addWidget(self.stage_label)
+        self.flow_rail = FlowRail()
+        progress_layout.addWidget(self.flow_rail, alignment=Qt.AlignmentFlag.AlignRight)
+        top_layout.addLayout(progress_layout)
         root.addWidget(top_bar)
 
         self.stack = QStackedWidget()
         root.addWidget(self.stack, 1)
+
+    def set_stage(self, index: int, label: str) -> None:
+        self.stage_label.setText(f"{index + 1:02d} / 05 · {label.upper()}")
+        self.flow_rail.set_stage(index, label)
 
 
 class AddPage(QWidget):
@@ -573,8 +712,11 @@ class AddPage(QWidget):
         content.setMaximumWidth(820)
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(14)
+        content_layout.setSpacing(12)
 
+        eyebrow = QLabel("FILA AUTORIZADA · YOUTUBE / CSV")
+        eyebrow.setObjectName("eyebrow")
+        content_layout.addWidget(eyebrow)
         title = QLabel("Adicionar músicas")
         title.setObjectName("pageTitle")
         content_layout.addWidget(title)
@@ -585,6 +727,17 @@ class AddPage(QWidget):
         subtitle.setWordWrap(True)
         content_layout.addWidget(subtitle)
 
+        input_header = QHBoxLayout()
+        input_header.setContentsMargins(0, 5, 0, 0)
+        input_label = QLabel("FAIXAS E LINKS")
+        input_label.setObjectName("fieldLabel")
+        input_header.addWidget(input_label)
+        input_header.addStretch(1)
+        self.input_summary_label = QLabel("Use ; para separar vários itens")
+        self.input_summary_label.setObjectName("inputSummary")
+        input_header.addWidget(self.input_summary_label)
+        content_layout.addLayout(input_header)
+
         self.input_edit = QPlainTextEdit()
         self.input_edit.setObjectName("universalInput")
         self.input_edit.setPlaceholderText(
@@ -593,6 +746,7 @@ class AddPage(QWidget):
         self.input_edit.setMinimumHeight(150)
         self.input_edit.setMaximumHeight(220)
         self.input_edit.setMaximumBlockCount(10000)
+        input_label.setBuddy(self.input_edit)
         content_layout.addWidget(self.input_edit)
 
         self.notice = NoticeBanner()
@@ -608,8 +762,8 @@ class AddPage(QWidget):
         destination_layout.addWidget(folder_icon)
         destination_text = QVBoxLayout()
         destination_text.setSpacing(1)
-        destination_title = QLabel("Pasta de destino")
-        destination_title.setObjectName("tertiaryText")
+        destination_title = QLabel("SALVAR EM")
+        destination_title.setObjectName("outputLabel")
         destination_text.addWidget(destination_title)
         self.destination_edit = QLineEdit()
         self.destination_edit.setPlaceholderText("Escolha onde salvar os arquivos")
@@ -617,22 +771,32 @@ class AddPage(QWidget):
         self.destination_edit.setStyleSheet("padding: 0; border: 0; background: transparent;")
         destination_text.addWidget(self.destination_edit)
         destination_layout.addLayout(destination_text, 1)
-        self.browse_button = QPushButton("Alterar…")
-        self.browse_button.setObjectName("quietButton")
+        self.browse_button = QPushButton("Escolher pasta")
+        self.browse_button.setObjectName("secondaryButton")
+        _set_button_icon(self.browse_button, "folder-open")
         destination_layout.addWidget(self.browse_button)
         content_layout.addWidget(destination_surface)
 
         actions = QHBoxLayout()
         actions.setSpacing(8)
-        self.import_button = QPushButton("Importar")
-        self.options_button = QPushButton("Opções")
-        self.import_button.setObjectName("quietButton")
-        self.options_button.setObjectName("quietButton")
+        self.import_button = QPushButton("Importar lista")
+        self.options_button = QPushButton("MP3 · 192 kbps")
+        self.import_button.setObjectName("secondaryButton")
+        self.options_button.setObjectName("profileButton")
+        self.import_button.setToolTip("Adicionar músicas de um CSV exportado do Spotify.")
+        self.options_button.setToolTip(
+            "Alterar tipo de mídia, formato, qualidade e sessão do YouTube."
+        )
+        _set_button_icon(self.import_button, "import")
+        _set_button_icon(self.options_button, "sliders")
         actions.addWidget(self.import_button)
         actions.addWidget(self.options_button)
         actions.addStretch(1)
         self.search_button = QPushButton("Pesquisar músicas")
         self.search_button.setObjectName("primaryButton")
+        self.search_button.setEnabled(False)
+        self.search_button.setToolTip("Adicione pelo menos uma música ou link para pesquisar.")
+        _set_button_icon(self.search_button, "search")
         actions.addWidget(self.search_button)
         content_layout.addLayout(actions)
 
@@ -641,10 +805,33 @@ class AddPage(QWidget):
         root.addLayout(row)
         root.addStretch(1)
 
+    def set_input_summary(self, count: int, duplicate_count: int = 0) -> None:
+        if count == 0:
+            text = "Use ; para separar vários itens"
+        else:
+            noun = "item pronto" if count == 1 else "itens prontos"
+            text = f"{count} {noun}"
+            if duplicate_count:
+                duplicate_noun = (
+                    "duplicata será ignorada"
+                    if duplicate_count == 1
+                    else "duplicatas serão ignoradas"
+                )
+                text += f" · {duplicate_count} {duplicate_noun}"
+        self.input_summary_label.setText(text)
+        self.input_summary_label.setProperty("ready", "true" if count else "false")
+        self.input_summary_label.style().unpolish(self.input_summary_label)
+        self.input_summary_label.style().polish(self.input_summary_label)
+
+    def set_profile_summary(self, text: str) -> None:
+        self.options_button.setText(text)
+
 
 class SearchPage(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self._total = 0
+        self._found = 0
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 28, 28, 28)
         root.addStretch(1)
@@ -654,19 +841,25 @@ class SearchPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
+        eyebrow = QLabel("ANÁLISE DA FILA")
+        eyebrow.setObjectName("eyebrow")
+        eyebrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(eyebrow)
         title = QLabel("Pesquisando músicas")
         title.setObjectName("pageTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
-        subtitle = QLabel("Encontrando os melhores resultados…")
+        subtitle = QLabel("Comparando cada item com resultados do YouTube.")
         subtitle.setObjectName("pageSubtitle")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(subtitle)
         self.activity = QProgressBar()
         self.activity.setObjectName("activityProgress")
-        self.activity.setRange(0, 0)
+        self.activity.setRange(0, 1)
+        self.activity.setValue(0)
+        self.activity.setTextVisible(False)
         layout.addWidget(self.activity)
-        self.found_label = QLabel("Nenhuma encontrada ainda")
+        self.found_label = QLabel("Preparando a fila…")
         self.found_label.setObjectName("secondaryText")
         self.found_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.found_label)
@@ -674,6 +867,7 @@ class SearchPage(QWidget):
         layout.addWidget(self.notice)
         self.cancel_button = QPushButton("Cancelar")
         self.cancel_button.setObjectName("dangerButton")
+        _set_button_icon(self.cancel_button, "close")
         self.cancel_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         cancel_row = QHBoxLayout()
         cancel_row.addStretch(1)
@@ -688,72 +882,109 @@ class SearchPage(QWidget):
         root.addLayout(center)
         root.addStretch(1)
 
-    def reset(self) -> None:
-        self.found_label.setText("Nenhuma encontrada ainda")
+    def reset(self, total: int = 0) -> None:
+        self._total = max(0, total)
+        self._found = 0
+        self.activity.setRange(0, max(1, self._total))
+        self.activity.setValue(0)
+        self._update_progress_text(0)
         self.notice.clear()
 
     def set_found_count(self, count: int) -> None:
-        if count == 0:
-            self.found_label.setText("Nenhuma encontrada ainda")
-        elif count == 1:
-            self.found_label.setText("1 encontrada")
-        else:
-            self.found_label.setText(f"{count} encontradas")
+        self._found = max(0, count)
+        self._update_progress_text(self.activity.value())
+
+    def set_progress(self, processed: int, total: int, found: int) -> None:
+        self._total = max(0, total)
+        self._found = max(0, found)
+        self.activity.setRange(0, max(1, self._total))
+        self.activity.setValue(min(max(0, processed), max(1, self._total)))
+        self._update_progress_text(processed)
+
+    def _update_progress_text(self, processed: int) -> None:
+        if self._total <= 0:
+            self.found_label.setText("Preparando a fila…")
+            return
+        analysed = "analisado" if self._total == 1 else "analisados"
+        found = "1 encontrada" if self._found == 1 else f"{self._found} encontradas"
+        self.found_label.setText(
+            f"{min(max(0, processed), self._total)} de {self._total} {analysed} · {found}"
+        )
+
+
+_AUDIO_FORMAT_NAMES = {
+    AudioFormat.AAC: "AAC",
+    AudioFormat.ALAC: "ALAC",
+    AudioFormat.FLAC: "FLAC",
+    AudioFormat.M4A: "M4A",
+    AudioFormat.MP3: "MP3",
+    AudioFormat.OPUS: "Opus",
+    AudioFormat.VORBIS: "Vorbis",
+    AudioFormat.WAV: "WAV",
+}
+
+_VIDEO_FORMAT_NAMES = {
+    VideoFormat.MP4_COMPATIBLE: "MP4 compatível",
+    VideoFormat.MP4_FAST: "MP4 rápido",
+    VideoFormat.WEBM: "WebM",
+    VideoFormat.ORIGINAL: "Formato original",
+}
+
+
+def format_profile_summary(profile: DownloadProfile = DEFAULT_DOWNLOAD_PROFILE) -> str:
+    """Return the compact output profile shown beside primary actions."""
+
+    if profile.media_kind is MediaKind.AUDIO:
+        fmt = _AUDIO_FORMAT_NAMES.get(profile.audio_format, "MP3")
+        if profile.audio_bitrate_kbps is not None:
+            return f"{fmt} · {profile.audio_bitrate_kbps} kbps"
+        return fmt
+    fmt = _VIDEO_FORMAT_NAMES.get(profile.video_format, "Vídeo")
+    if profile.video_format is VideoFormat.ORIGINAL:
+        return fmt
+    resolution = (
+        f"até {profile.max_video_height}p"
+        if profile.max_video_height is not None
+        else "melhor resolução"
+    )
+    return f"{fmt} · {resolution}"
 
 
 def format_download_cta(
     selected: int, profile: DownloadProfile = DEFAULT_DOWNLOAD_PROFILE
 ) -> str:
+    """Keep the primary action direct; output details live in the profile control."""
+
+    if selected <= 0:
+        return "Baixar seleção"
     if profile.media_kind is MediaKind.AUDIO:
-        if selected == 0:
-            return "Baixar áudios"
-        count_str = "1 áudio" if selected == 1 else f"{selected} áudios"
-        format_names = {
-            AudioFormat.AAC: "AAC",
-            AudioFormat.ALAC: "ALAC",
-            AudioFormat.FLAC: "FLAC",
-            AudioFormat.M4A: "M4A",
-            AudioFormat.MP3: "MP3",
-            AudioFormat.OPUS: "Opus",
-            AudioFormat.VORBIS: "Vorbis",
-            AudioFormat.WAV: "WAV",
-        }
-        fmt = format_names.get(profile.audio_format, "MP3")
-        if profile.audio_bitrate_kbps is not None:
-            return f"Baixar {count_str} em {fmt} · {profile.audio_bitrate_kbps} kbps"
-        return f"Baixar {count_str} em {fmt}"
-    else:  # MediaKind.VIDEO
-        if selected == 0:
-            return "Baixar vídeos"
-        count_str = "1 vídeo" if selected == 1 else f"{selected} vídeos"
-        if profile.video_format is VideoFormat.ORIGINAL:
-            return f"Baixar {count_str} no formato original"
-        video_fmt_names = {
-            VideoFormat.MP4_COMPATIBLE: "em MP4",
-            VideoFormat.MP4_FAST: "em MP4 rápido",
-            VideoFormat.WEBM: "em WebM",
-        }
-        fmt = video_fmt_names.get(profile.video_format, "em vídeo")
-        if profile.max_video_height is not None:
-            return f"Baixar {count_str} {fmt} · até {profile.max_video_height}p"
-        return f"Baixar {count_str} {fmt} · melhor resolução"
+        noun = "áudio" if selected == 1 else "áudios"
+    else:
+        noun = "vídeo" if selected == 1 else "vídeos"
+    return f"Baixar {selected} {noun}"
 
 
 class ReviewPage(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self._profile_summary = format_profile_summary()
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 18, 24, 20)
         root.setSpacing(12)
 
         header = QHBoxLayout()
         self.back_button = QToolButton()
-        self.back_button.setText("‹  Adicionar")
+        self.back_button.setText("Voltar à entrada")
         self.back_button.setObjectName("quietButton")
+        _set_button_icon(self.back_button, "arrow-left")
         header.addWidget(self.back_button)
         header.addStretch(1)
-        self.options_button = QPushButton("Opções")
-        self.options_button.setObjectName("quietButton")
+        self.options_button = QPushButton(self._profile_summary)
+        self.options_button.setObjectName("profileButton")
+        self.options_button.setToolTip(
+            "Alterar tipo de mídia, formato, qualidade e sessão do YouTube."
+        )
+        _set_button_icon(self.options_button, "sliders")
         header.addWidget(self.options_button)
         root.addLayout(header)
 
@@ -765,17 +996,27 @@ class ReviewPage(QWidget):
         )
         subtitle.setObjectName("pageSubtitle")
         root.addWidget(subtitle)
+        review_hint = QLabel(
+            "Dê dois cliques em uma faixa para corrigir a busca antes do download."
+        )
+        review_hint.setObjectName("tertiaryText")
+        root.addWidget(review_hint)
 
         actions = QHBoxLayout()
         self.summary_label = QLabel("Nenhum resultado")
         self.summary_label.setObjectName("secondaryText")
         actions.addWidget(self.summary_label)
+        self.selection_label = QLabel("0 selecionadas")
+        self.selection_label.setObjectName("selectionBadge")
+        actions.addWidget(self.selection_label)
         actions.addStretch(1)
         self.select_found_button = QPushButton("Selecionar encontradas")
-        self.clear_selection_button = QPushButton("Desmarcar")
-        self.more_button = QPushButton("Mais ações")
+        self.clear_selection_button = QPushButton("Limpar seleção")
+        self.more_button = QPushButton("Ações da faixa")
         for button in (self.select_found_button, self.clear_selection_button, self.more_button):
             button.setObjectName("quietButton")
+        _set_button_icon(self.more_button, "more")
+        self.more_button.setEnabled(False)
         actions.addWidget(self.select_found_button)
         actions.addWidget(self.clear_selection_button)
         actions.addWidget(self.more_button)
@@ -809,23 +1050,37 @@ class ReviewPage(QWidget):
         self.editor.hide()
         root.addWidget(self.editor)
 
-        footer = QHBoxLayout()
+        action_dock = QFrame()
+        action_dock.setObjectName("actionDock")
+        footer = QHBoxLayout(action_dock)
+        footer.setContentsMargins(14, 10, 10, 10)
         footer.setSpacing(10)
         folder = QLabel()
         folder.setPixmap(QIcon(":/icons/folder.svg").pixmap(18, 18))
         footer.addWidget(folder)
-        self.destination_label = QLabel("Destino não definido")
+        destination_text = QVBoxLayout()
+        destination_text.setSpacing(1)
+        destination_title = QLabel("SALVAR EM")
+        destination_title.setObjectName("outputLabel")
+        destination_text.addWidget(destination_title)
+        self.destination_label = ElidedPathLabel("Destino não definido")
         self.destination_label.setObjectName("secondaryText")
         self.destination_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        footer.addWidget(self.destination_label, 1)
-        self.change_destination_button = QPushButton("Alterar…")
+        destination_text.addWidget(self.destination_label)
+        self.download_hint_label = QLabel("Escolha uma pasta para habilitar o download.")
+        self.download_hint_label.setObjectName("downloadHint")
+        destination_text.addWidget(self.download_hint_label)
+        footer.addLayout(destination_text, 1)
+        self.change_destination_button = QPushButton("Trocar pasta")
         self.change_destination_button.setObjectName("quietButton")
+        _set_button_icon(self.change_destination_button, "folder-open")
         footer.addWidget(self.change_destination_button)
-        self.download_button = QPushButton("Baixar áudios")
+        self.download_button = QPushButton("Baixar seleção")
         self.download_button.setObjectName("primaryButton")
         self.download_button.setEnabled(False)
+        _set_button_icon(self.download_button, "download")
         footer.addWidget(self.download_button)
-        root.addLayout(footer)
+        root.addWidget(action_dock)
 
     def update_summary(self, found: int, review: int) -> None:
         pieces = [f"{found} encontrada" if found == 1 else f"{found} encontradas"]
@@ -835,6 +1090,14 @@ class ReviewPage(QWidget):
             )
         self.summary_label.setText("  ·  ".join(pieces))
 
+    def update_selected_count(self, selected: int) -> None:
+        noun = "selecionada" if selected == 1 else "selecionadas"
+        self.selection_label.setText(f"{selected} {noun}")
+
+    def set_profile_summary(self, text: str) -> None:
+        self._profile_summary = text
+        self.options_button.setText(text)
+
     def update_download_cta(
         self,
         selected: int,
@@ -843,14 +1106,21 @@ class ReviewPage(QWidget):
         profile: DownloadProfile = DEFAULT_DOWNLOAD_PROFILE,
     ) -> None:
         cta_text = format_download_cta(selected, profile)
+        profile_summary = format_profile_summary(profile)
         self.download_button.setText(cta_text)
-        self.download_button.setToolTip(cta_text)
-        self.download_button.setAccessibleName(cta_text)
+        self.download_button.setToolTip(f"{cta_text} · {profile_summary}")
+        self.download_button.setAccessibleName(f"{cta_text} em {profile_summary}")
         self.download_button.setEnabled(selected > 0 and has_destination)
+        if selected <= 0:
+            hint = "Selecione pelo menos uma faixa encontrada."
+        elif not has_destination:
+            hint = "Escolha a pasta de destino para baixar."
+        else:
+            hint = f"{profile_summary} · pronto para baixar"
+        self.download_hint_label.setText(hint)
 
     def set_destination(self, destination: str) -> None:
-        self.destination_label.setText(destination or "Destino não definido")
-        self.destination_label.setToolTip(destination)
+        self.destination_label.set_path(destination)
 
 
 class DownloadPage(QWidget):
@@ -865,6 +1135,12 @@ class DownloadPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(15)
 
+        eyebrow = QLabel("DOWNLOAD EM ANDAMENTO")
+        eyebrow.setObjectName("eyebrow")
+        layout.addWidget(eyebrow)
+        title = QLabel("Salvando sua seleção")
+        title.setObjectName("pageTitle")
+        layout.addWidget(title)
         self.count_label = QLabel("0 de 0 concluídos")
         self.count_label.setObjectName("largeMetric")
         layout.addWidget(self.count_label)
@@ -884,12 +1160,14 @@ class DownloadPage(QWidget):
         layout.addWidget(self.error_label)
 
         detail_header = QHBoxLayout()
-        self.details_button = QPushButton("Ver detalhes")
+        self.details_button = QPushButton("Mostrar log técnico")
         self.details_button.setObjectName("quietButton")
+        _set_button_icon(self.details_button, "details")
         detail_header.addWidget(self.details_button)
         detail_header.addStretch(1)
         self.cancel_button = QPushButton("Cancelar download")
         self.cancel_button.setObjectName("dangerButton")
+        _set_button_icon(self.cancel_button, "close")
         detail_header.addWidget(self.cancel_button)
         layout.addLayout(detail_header)
         self.log_edit = QPlainTextEdit()
@@ -915,12 +1193,14 @@ class DownloadPage(QWidget):
         self.error_label.clear()
         self.log_edit.clear()
         self.log_edit.hide()
-        self.details_button.setText("Ver detalhes")
+        self.details_button.setText("Mostrar log técnico")
 
     def toggle_details(self) -> None:
         visible = not self.log_edit.isVisible()
         self.log_edit.setVisible(visible)
-        self.details_button.setText("Ocultar detalhes" if visible else "Ver detalhes")
+        self.details_button.setText(
+            "Ocultar log técnico" if visible else "Mostrar log técnico"
+        )
 
 
 class CompletionPage(QWidget):
@@ -936,6 +1216,10 @@ class CompletionPage(QWidget):
         layout.setSpacing(14)
         layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
+        eyebrow = QLabel("SESSÃO FINALIZADA")
+        eyebrow.setObjectName("eyebrow")
+        eyebrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(eyebrow)
         self.icon_label = QLabel()
         self.icon_label.setObjectName("successIcon")
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -969,7 +1253,10 @@ class CompletionPage(QWidget):
         actions = QHBoxLayout()
         self.open_folder_button = QPushButton("Abrir pasta")
         self.open_folder_button.setObjectName("primaryButton")
-        self.new_operation_button = QPushButton("Nova operação")
+        self.new_operation_button = QPushButton("Adicionar nova lista")
+        self.new_operation_button.setObjectName("secondaryButton")
+        _set_button_icon(self.open_folder_button, "folder-open-dark")
+        _set_button_icon(self.new_operation_button, "refresh")
         actions.addWidget(self.open_folder_button)
         actions.addWidget(self.new_operation_button)
         layout.addLayout(actions)

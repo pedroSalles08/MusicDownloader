@@ -4,21 +4,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import QApplication, QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 from music_downloader.models import SearchResult, SearchStatus
 from music_downloader.ui.styles import (
     ACCENT,
+    CUE,
     ERROR,
     SEPARATOR,
+    SURFACE,
     SUCCESS,
     SURFACE_HOVER,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
     TEXT_TERTIARY,
-    WARNING,
 )
 
 
@@ -256,7 +257,7 @@ class ReviewListModel(QAbstractListModel):
 
 
 class ReviewItemDelegate(QStyledItemDelegate):
-    """Paint a compact Apple Music/Finder-inspired review row."""
+    """Paint a compact review row in the app's midnight-deck visual language."""
 
     actionsRequested = Signal(object)
 
@@ -276,7 +277,7 @@ class ReviewItemDelegate(QStyledItemDelegate):
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
         if selected:
-            painter.fillRect(rect.adjusted(1, 0, -1, 0), QColor("#24364D"))
+            painter.fillRect(rect.adjusted(1, 0, -1, 0), QColor("#22324A"))
         elif hovered:
             painter.fillRect(rect.adjusted(1, 0, -1, 0), QColor(SURFACE_HOVER))
 
@@ -284,8 +285,8 @@ class ReviewItemDelegate(QStyledItemDelegate):
         checkable = bool(index.flags() & Qt.ItemFlag.ItemIsUserCheckable)
         checked = index.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setPen(QPen(QColor(ACCENT if checkable else "#3A3A40"), 1))
-        painter.setBrush(QColor(ACCENT if checked else "#17171A"))
+        painter.setPen(QPen(QColor(ACCENT if checkable else SEPARATOR), 1))
+        painter.setBrush(QColor(ACCENT if checked else SURFACE))
         painter.drawRoundedRect(check_rect, 4, 4)
         if checked:
             self._check_icon.paint(painter, check_rect.adjusted(1, 1, -1, -1))
@@ -296,8 +297,14 @@ class ReviewItemDelegate(QStyledItemDelegate):
         right_margin = 18
         actions_rect = self._actions_rect(rect)
         status = str(index.data(ReviewListModel.StatusRole) or "")
+        progress = str(index.data(ReviewListModel.ProgressRole) or "")
+        status_display = status
+        if progress and progress.casefold() != status.casefold():
+            status_display = f"{status} · {progress}"
         duration = str(index.data(ReviewListModel.DurationRole) or "")
-        status_width = min(150, max(78, painter.fontMetrics().horizontalAdvance(status) + 14))
+        status_width = min(
+            170, max(88, painter.fontMetrics().horizontalAdvance(status_display) + 18)
+        )
         duration_width = 48
         status_left = actions_rect.left() - 12 - status_width
         duration_left = status_left - duration_width - 12
@@ -337,19 +344,51 @@ class ReviewItemDelegate(QStyledItemDelegate):
             duration,
         )
         status_color = TEXT_SECONDARY
+        status_background = QColor("#1B2430")
+        status_border = QColor("#465364")
         lowered = status.casefold()
         if "erro" in lowered or "falha" in lowered:
             status_color = ERROR
-        elif "sem resultado" in lowered or "editado" in lowered or "tentativa" in lowered:
-            status_color = WARNING
-        elif "concluído" in lowered:
+            status_background = QColor("#321B1E")
+            status_border = QColor("#714043")
+        elif any(
+            marker in lowered
+            for marker in ("sem resultado", "editado", "tentativa", "tentando", "cancelado")
+        ):
+            status_color = CUE
+            status_background = QColor("#302516")
+            status_border = QColor("#6D5531")
+        elif "encontrado" in lowered or "concluído" in lowered or "pronto" in lowered:
             status_color = SUCCESS
+            status_background = QColor("#162A22")
+            status_border = QColor("#35654A")
+        elif any(
+            marker in lowered
+            for marker in ("pesquis", "aguardando", "baixando", "convertendo")
+        ):
+            status_color = ACCENT
+            status_background = QColor("#192941")
+            status_border = QColor("#3D5E8B")
+        status_rect = QRect(
+            status_left,
+            rect.center().y() - 12,
+            status_width,
+            24,
+        )
+        painter.setPen(QPen(status_border, 1))
+        painter.setBrush(status_background)
+        painter.drawRoundedRect(QRectF(status_rect), 6, 6)
         painter.setPen(QColor(status_color))
         painter.drawText(
-            QRect(status_left, rect.top(), status_width, rect.height()),
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-            painter.fontMetrics().elidedText(status, Qt.TextElideMode.ElideRight, status_width),
+            status_rect.adjusted(8, 0, -8, 0),
+            Qt.AlignmentFlag.AlignCenter,
+            painter.fontMetrics().elidedText(
+                status_display, Qt.TextElideMode.ElideRight, status_width - 16
+            ),
         )
+        painter.setPen(QPen(QColor("#465364"), 1))
+        painter.setBrush(QColor("#202A35" if selected or hovered else SURFACE))
+        painter.drawRoundedRect(QRectF(actions_rect), 6, 6)
         painter.setPen(QColor(TEXT_SECONDARY if selected or hovered else TEXT_TERTIARY))
         painter.drawText(actions_rect, Qt.AlignmentFlag.AlignCenter, "⋯")
 
@@ -359,7 +398,10 @@ class ReviewItemDelegate(QStyledItemDelegate):
 
     def editorEvent(self, event, model, option, index) -> bool:  # noqa: N802
         if isinstance(event, QMouseEvent) and event.type() == QEvent.Type.MouseButtonRelease:
-            if event.button() == Qt.MouseButton.LeftButton and self._check_rect(option.rect).contains(event.position().toPoint()):
+            if (
+                event.button() == Qt.MouseButton.LeftButton
+                and self._check_rect(option.rect).contains(event.position().toPoint())
+            ):
                 if index.flags() & Qt.ItemFlag.ItemIsUserCheckable:
                     checked = index.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked
                     model.setData(

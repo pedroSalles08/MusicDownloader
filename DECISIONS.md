@@ -124,3 +124,21 @@ Cada release também oferece um ZIP portátil e hashes SHA-256. Tags `v*` aciona
 um workflow Windows que executa os testes, recompila os artefatos e cria uma
 GitHub Release. Assinatura de código permanece uma evolução futura e essa
 limitação é informada ao usuário antes do download.
+
+## ADR-014 — Identidade Midnight Deck e affordances explícitos
+
+**Status:** aceita.
+
+O fluxo progressivo da ADR-011 é preservado, mas a camada visual passa a usar a
+direção Midnight Deck documentada em `DESIGN_SYSTEM.md`. A interface combina
+grafite azulado, texto quente, azul mineral e âmbar com microtipografia
+monoespaçada restrita a informação operacional. A linha de cinco pontos no
+cabeçalho funciona como playhead e indicador de etapa; ela representa o fluxo
+real e não acrescenta uma navegação paralela.
+
+Opções de saída deixam de aparecer sob o rótulo genérico `Opções`: o botão
+mostra o perfil efetivo, enquanto o CTA informa somente a ação e a quantidade.
+Entrada, seleção, destino e progresso ganham feedback persistente. Ícones SVG
+locais acompanham texto, estados de faixa usam texto dentro de cápsulas e toda
+ação desabilitada mantém uma explicação próxima. Serviços, workers, tipos de
+domínio e contratos de download não são alterados.

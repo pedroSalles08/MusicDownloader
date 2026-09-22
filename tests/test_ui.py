@@ -29,7 +29,17 @@ from music_downloader.models import (
     SearchStatus,
 )
 from music_downloader.ui.main_window import FlowStage, MainWindow
-from music_downloader.ui.styles import ACCENT, BACKGROUND, SURFACE, TEXT_PRIMARY, WARNING
+from music_downloader.ui.styles import (
+    ACCENT,
+    BACKGROUND,
+    CUE,
+    ON_ACCENT,
+    SURFACE,
+    TEXT_PRIMARY,
+    TEXT_SECONDARY,
+    TEXT_TERTIARY,
+    WARNING,
+)
 
 
 def _as_media_kind(value: object) -> MediaKind:
@@ -216,6 +226,23 @@ def test_window_starts_with_native_progressive_add_page(qtbot) -> None:
     assert not (window.windowFlags() & Qt.WindowType.FramelessWindowHint)
     assert window.input_edit.placeholderText()
     assert window.add_page.search_button.text() == "Pesquisar músicas"
+    assert not window.add_page.search_button.isEnabled()
+    assert window.shell.stage_label.text() == "01 / 05 · ADICIONAR"
+    assert window.add_page.input_summary_label.text() == "Use ; para separar vários itens"
+
+
+def test_add_page_explains_input_count_duplicates_and_output_profile(qtbot) -> None:
+    window, _search, _download = make_window(qtbot)
+
+    window.input_edit.setPlainText("One; one;; Two")
+
+    assert window.add_page.input_summary_label.text() == (
+        "2 itens prontos · 1 duplicata será ignorada"
+    )
+    assert window.add_page.search_button.text() == "Pesquisar 2 itens"
+    assert window.add_page.search_button.isEnabled()
+    assert window.add_page.import_button.text() == "Importar lista"
+    assert window.add_page.options_button.text() == "MP3 · 192 kbps"
 
 
 def test_import_and_options_are_discrete_popovers(qtbot) -> None:
@@ -228,6 +255,7 @@ def test_import_and_options_are_discrete_popovers(qtbot) -> None:
 
     window._show_options_from_add()
     assert window.options_popover.isVisible()
+    assert window.add_page.options_button.text() == "MP3 · 192 kbps"
     assert window.cover_checkbox.text() == "Incorporar thumbnail como capa"
     assert window.cookie_browser_combo.count() >= 2
 
@@ -286,7 +314,10 @@ def test_search_page_is_minimal_and_event_loop_stays_responsive(qtbot) -> None:
     window.prepare_and_search()
     assert window.stage is FlowStage.SEARCHING
     assert window.search_page.isVisible()
-    assert window.search_page.activity.maximum() == 0
+    assert window.search_page.activity.maximum() == 1
+    assert window.search_page.activity.value() == 0
+    assert "0 de 1 analisado" in window.search_page.found_label.text()
+    assert window.shell.stage_label.text() == "02 / 05 · PESQUISAR"
     assert window.search_page.cancel_button.isEnabled()
     QTimer.singleShot(30, lambda: ticked.append(True))
     qtbot.waitUntil(lambda: bool(ticked), timeout=500)
@@ -304,17 +335,23 @@ def test_successful_search_transitions_to_list_and_dynamic_cta(qtbot, tmp_path: 
     assert [result.query for result in window.search_results] == ["One", "Two"]
     assert window.review_model.selected_count == 2
     assert "2 encontradas" in window.review_page.summary_label.text()
-    assert window.download_button.text() == "Baixar 2 áudios em MP3 · 192 kbps"
+    assert window.shell.stage_label.text() == "03 / 05 · REVISAR"
+    assert window.download_button.text() == "Baixar 2 áudios"
+    assert window.review_page.options_button.text() == "MP3 · 192 kbps"
+    assert window.review_page.selection_label.text() == "2 selecionadas"
+    assert "Escolha a pasta" in window.review_page.download_hint_label.text()
     assert not window.download_button.isEnabled()
 
     window.destination_edit.setText(str(tmp_path))
     assert window.download_button.isEnabled()
+    assert "MP3 · 192 kbps" in window.review_page.download_hint_label.text()
     window.review_model.setData(
         window.review_model.index(1),
         Qt.CheckState.Unchecked,
         Qt.ItemDataRole.CheckStateRole,
     )
-    assert window.download_button.text() == "Baixar 1 áudio em MP3 · 192 kbps"
+    assert window.download_button.text() == "Baixar 1 áudio"
+    assert window.review_page.selection_label.text() == "1 selecionada"
 
 
 def test_playlist_expansion_preserves_order_url_and_individual_research(qtbot) -> None:
@@ -421,6 +458,7 @@ def test_download_uses_approved_results_options_and_shows_minimal_completion(
 
     window.start_download()
     assert window.stage is FlowStage.DOWNLOADING
+    assert window.shell.stage_label.text() == "04 / 05 · BAIXAR"
     wait_idle(qtbot, window)
 
     call = download.calls[0]
@@ -430,10 +468,12 @@ def test_download_uses_approved_results_options_and_shows_minimal_completion(
     assert call["aria2c_path"] == "aria2c.exe"
     assert call["cookie_browser"] == "chrome"
     assert window.stage is FlowStage.COMPLETE
+    assert window.shell.stage_label.text() == "05 / 05 · CONCLUÍDO"
     assert window.completion_page.title_label.text() == "Download finalizado"
     assert "1 áudio foi baixado" in window.completion_page.summary_label.text()
     assert "1 áudio não foi concluído" in window.completion_page.failures_button.text()
     assert "fake failure" in window.completion_page.failures_edit.toPlainText()
+    assert window.completion_page.new_operation_button.text() == "Adicionar nova lista"
 
 
 def test_preflight_error_returns_to_review_with_actionable_notice(qtbot, tmp_path: Path) -> None:
@@ -606,7 +646,11 @@ def test_visual_tokens_resources_and_accessibility(qtbot) -> None:
     window, _search, _download = make_window(qtbot)
 
     assert _contrast(TEXT_PRIMARY, BACKGROUND) >= 4.5
+    assert _contrast(TEXT_SECONDARY, SURFACE) >= 4.5
+    assert _contrast(TEXT_TERTIARY, BACKGROUND) >= 4.5
     assert _contrast(ACCENT, BACKGROUND) >= 4.5
+    assert _contrast(ON_ACCENT, ACCENT) >= 4.5
+    assert _contrast(CUE, BACKGROUND) >= 4.5
     assert _contrast(WARNING, SURFACE) >= 4.5
     assert not window.input_edit.accessibleName() == ""
     assert not window.destination_edit.accessibleName() == ""
@@ -614,6 +658,11 @@ def test_visual_tokens_resources_and_accessibility(qtbot) -> None:
     assert not window.log_edit.accessibleName() == ""
     assert not window.total_progress.accessibleName() == ""
     assert not window.review_delegate._music_icon.isNull()
+    assert not window.add_page.import_button.icon().isNull()
+    assert not window.add_page.options_button.icon().isNull()
+    assert not window.add_page.search_button.icon().isNull()
+    assert not window.review_page.download_button.icon().isNull()
+    assert "Etapa 1 de 5" in window.shell.flow_rail.accessibleDescription()
     assert window.media_kind_combo.accessibleName() == "Tipo de mídia"
     assert window.audio_format_combo.accessibleName() == "Formato de áudio"
     assert window.audio_quality_combo.accessibleName() == "Qualidade do áudio"
@@ -844,38 +893,43 @@ def test_review_cta_formatting_audio_and_video(qtbot) -> None:
     # Audio lossy 1 & 2 items
     window.options_popover.set_profile(DownloadProfile.for_audio(AudioFormat.MP3, bitrate_kbps=192))
     window.review_model.select_all_found()
-    assert window.download_button.text() == "Baixar 3 áudios em MP3 · 192 kbps"
+    assert window.download_button.text() == "Baixar 3 áudios"
+    assert window.review_page.options_button.text() == "MP3 · 192 kbps"
 
     window.review_model.clear_selection()
     window.review_model.setData(
         window.review_model.index(0), Qt.CheckState.Checked, Qt.ItemDataRole.CheckStateRole
     )
-    assert window.download_button.text() == "Baixar 1 áudio em MP3 · 192 kbps"
+    assert window.download_button.text() == "Baixar 1 áudio"
 
     # Audio lossless
     window.options_popover.set_profile(DownloadProfile.for_audio(AudioFormat.FLAC))
-    assert window.download_button.text() == "Baixar 1 áudio em FLAC"
+    assert window.download_button.text() == "Baixar 1 áudio"
+    assert window.review_page.options_button.text() == "FLAC"
     window.review_model.select_all_found()
-    assert window.download_button.text() == "Baixar 3 áudios em FLAC"
+    assert window.download_button.text() == "Baixar 3 áudios"
 
     window.options_popover.set_profile(DownloadProfile.for_audio(AudioFormat.WAV))
-    assert window.download_button.text() == "Baixar 3 áudios em WAV"
+    assert window.download_button.text() == "Baixar 3 áudios"
+    assert window.review_page.options_button.text() == "WAV"
 
     # Video with resolution limit
     window.options_popover.set_profile(
         DownloadProfile.for_video(VideoFormat.MP4_COMPATIBLE, max_height=1080)
     )
-    assert window.download_button.text() == "Baixar 3 vídeos em MP4 · até 1080p"
+    assert window.download_button.text() == "Baixar 3 vídeos"
+    assert window.review_page.options_button.text() == "MP4 compatível · até 1080p"
 
     # Video original
     window.options_popover.set_profile(DownloadProfile.for_video(VideoFormat.ORIGINAL))
-    assert window.download_button.text() == "Baixar 3 vídeos no formato original"
+    assert window.download_button.text() == "Baixar 3 vídeos"
+    assert window.review_page.options_button.text() == "Formato original"
 
     # Zero items selected
     window.review_model.clear_selection()
-    assert window.download_button.text() == "Baixar vídeos"
+    assert window.download_button.text() == "Baixar seleção"
     window.options_popover.set_profile(DownloadProfile.for_audio(AudioFormat.MP3))
-    assert window.download_button.text() == "Baixar áudios"
+    assert window.download_button.text() == "Baixar seleção"
 
 
 def test_all_popover_controls_disabled_when_busy(qtbot) -> None:
