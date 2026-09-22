@@ -47,6 +47,11 @@ progresso determinístico e estados de revisão mais legíveis.
   layout mínimo. A captura offscreen não valida a fonte no Windows real.
 - Versão `0.1.1` preparada para publicar a nova interface como release mais
   recente, preservando a release `v0.1.0` anterior.
+- Commit `c13a8d3` enviado à `main` e tag `v0.1.1` publicada no mesmo commit.
+- Workflow Windows da tag concluído com sucesso em **7 min 20 s**: testes,
+  instalador, ZIP portátil, hashes e publicação da GitHub Release passaram.
+- Release mais recente: <https://github.com/pedroSalles08/MusicDownloader/releases/tag/v0.1.1>.
+  O `SHA256SUMS.txt` remoto confere com os digests dos dois arquivos publicados.
 
 ## Evolução anterior — integração UI e perfis de mídia
 
